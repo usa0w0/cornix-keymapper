@@ -24,6 +24,7 @@ Cornix LP（分割キーボード、RMK + Vial）のカスタムキーマッピ�
 
 - Node.js 24（`.nvmrc`）。`nvm use` してから `npm install`
 - PR を出す前に `npm run lint`、`npm run typecheck`、`npm test`、`npm run build` を通す（CI も同じものを実行する）
+- `main` か `develop` に push されると GitHub Actions（`.github/workflows/deploy.yml`）が GitHub Pages へデプロイする。リリース版（`main`）は https://usa0w0.github.io/cornix-keymapper/ 、開発版（`develop`）は https://usa0w0.github.io/cornix-keymapper/dev/
 - 実機（Cornix LP）が要る確認は AI にはできない。ユーザーに手順を示して確かめてもらう
 
 ## リリース時

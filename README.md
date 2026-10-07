@@ -3,6 +3,8 @@
 Cornix LP（分割キーボード、RMK + Vial）のカスタムキーマッピングサイト。
 Vial の機能名を知らなくても、キーを選んで「どう押したら何が起きるか」を入れるだけで設定と書き込みができることを目指す。
 
+- 公開先: https://usa0w0.github.io/cornix-keymapper/ （リリース版。`main` の内容）
+- 開発版: https://usa0w0.github.io/cornix-keymapper/dev/ （`develop` の内容）
 - 仕様: [docs/spec.md](docs/spec.md)
 - 設計: [docs/design.md](docs/design.md)
 

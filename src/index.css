@@ -18,3 +18,12 @@ main {
   background: #b3261e;
   color: #fff;
 }
+
+.badge {
+  margin-left: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+  vertical-align: middle;
+}
