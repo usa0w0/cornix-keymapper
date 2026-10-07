@@ -1,8 +1,13 @@
 name: Deploy
 
+# GitHub Pages は1リポジトリに1サイトなので、リリース版（main）と開発版（develop）を
+# 毎回両方ビルドし、1つのサイトにまとめてデプロイする
+#   /cornix-keymapper/      main
+#   /cornix-keymapper/dev/  develop
+
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
 
 permissions:
@@ -18,19 +23,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: main
+          path: release
+      - uses: actions/checkout@v7
+        with:
+          ref: develop
+          path: dev
       - uses: actions/setup-node@v7
         with:
-          node-version-file: .nvmrc
+          node-version-file: dev/.nvmrc
           cache: npm
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
+          cache-dependency-path: |
+            release/package-lock.json
+            dev/package-lock.json
+      - name: リリース版（main）をビルド
+        working-directory: release
+        run: npm ci && npm run build
+      - name: 開発版（develop）をビルド
+        working-directory: dev
+        run: npm ci && npm run build -- --base=/cornix-keymapper/dev/
+      - name: 1つのサイトにまとめる
+        run: |
+          mkdir site
+          cp -r release/dist/. site/
+          cp -r dev/dist site/dev
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: dist
+          path: site
 
   deploy:
     needs: build

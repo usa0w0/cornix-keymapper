@@ -21,9 +21,18 @@
 | スタイル | 素の CSS（CSS Modules） | 画面数が少なく、UI ライブラリの学習が不要 |
 | 状態管理 | React の `useReducer` と Context | 編集中の状態は1つのオブジェクトで足りる |
 | CI | GitHub Actions（lint、型検査、テスト、ビルド） | PR ごとに実行 |
-| 公開 | GitHub Pages（`main` への push で Actions からデプロイ） | 仕様の指定。public リポジトリの無料枠内 |
+| 公開 | GitHub Pages（`main` と `develop` への push で Actions からデプロイ） | 仕様の指定。public リポジトリの無料枠内 |
 
-公開先は `https://usa0w0.github.io/cornix-keymapper/`。Vite の `base` を `/cornix-keymapper/` にしてある。
+公開先は次の2つ。GitHub Pages は1リポジトリに1サイトなので、デプロイのたびに両方をビルドして1つのサイトにまとめる。
+
+| 版 | 元のブランチ | URL |
+| --- | --- | --- |
+| リリース版 | `main` | `https://usa0w0.github.io/cornix-keymapper/` |
+| 開発版 | `develop` | `https://usa0w0.github.io/cornix-keymapper/dev/` |
+
+Vite の `base` は `/cornix-keymapper/` で、開発版だけビルド時に `--base=/cornix-keymapper/dev/` を渡す。開発版は見出しに「開発版」と表示する。
+
+2つの版は同じオリジンなので、`localStorage` を共有する。ブラウザ内に保存するデータのキーには `import.meta.env.BASE_URL` を含め、版ごとに分ける。
 
 ## 層と依存の向き
 
@@ -181,7 +190,7 @@ Vial のコンボは、キーの位置ではなくキーコードの組（最大
 ## 保存
 
 - `.vil`: Vial の JSON 形式。スナップショットと相互変換する。読み込んだ `.vil` は、いきなり書き込まず編集中の状態に入れ、通常の書き込みの流れ（差分の確認）を通す。UID が接続中の本体と違う時、レイヤー数やキー数が合わない時は読み込みを止めて理由を示す
-- 自動バックアップ: `localStorage` に、機器の UID ごとに直近 5 回分のスナップショットと日時を保存する。一覧から選んで編集中の状態に戻せる
+- 自動バックアップ: `localStorage` に、版（リリース版 / 開発版）と機器の UID ごとに直近 5 回分のスナップショットと日時を保存する。一覧から選んで編集中の状態に戻せる
 
 ## 画面
 
