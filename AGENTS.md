@@ -18,7 +18,17 @@ Cornix LP（分割キーボード、RMK + Vial）のカスタムキーマッピ�
 
 - 作業はこのリポジトリの issue に1作業1件で切り、1件につき1つの PR で、小さい単位で実装する
 - 進捗はこのリポジトリで管理する。workbench の issue には進捗を書かない
-- ブランチは `main` と `feature/<内容を表す短い英語>` だけで運用し、`main` に直接コミット・push しない。マージ後、feature ブランチは削除する
+
+## ブランチ運用（GitHub Flow）
+
+- ブランチは `main` と feature ブランチだけ。`main` は常に公開できる状態を保つ
+- `main` に直接コミット・push しない。変更は必ず PR を通す
+- 作業は、最新の `main` から `feature/<内容を表す短い英語>` を切って始める（例: `feature/webhid-transport`）。修正や文書だけの変更でも接頭辞は `feature/` にそろえる
+- PR は [.github/pull_request_template.md](.github/pull_request_template.md) の見出しに沿って書き、対応する issue を `Closes #NN` で結び付ける
+- CI が通り、ユーザーがレビューしてからマージする。マージはユーザーが行う
+- マージは squash で行う（1つの PR が `main` の1コミットになる）。PR のタイトルがコミットメッセージになる
+- マージ後、feature ブランチは削除する（GitHub 側は自動で削除される。手元は `git branch -d`）
+- 作業中に `main` が進んだら、`main` を feature ブランチにマージして取り込む（push 済みのブランチを rebase しない）
 
 ## 開発
 
