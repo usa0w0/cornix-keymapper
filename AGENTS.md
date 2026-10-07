@@ -5,6 +5,7 @@ Cornix LP（分割キーボード、RMK + Vial）のカスタムキーマッピ�
 ## 仕様
 
 - 仕様の正は [docs/spec.md](docs/spec.md)。実装・レビューの判断はこのファイルに従う
+- 設計は [docs/design.md](docs/design.md)。設計を変える時は docs/design.md も同じ PR で直す
 - 元の issue は usa0w0/workbench#3。引き継ぎ時点の記録であり、以後の正ではない
   - 読み方: `gh issue view 3 -R usa0w0/workbench --comments`
 
@@ -18,6 +19,12 @@ Cornix LP（分割キーボード、RMK + Vial）のカスタムキーマッピ�
 - 作業はこのリポジトリの issue に1作業1件で切り、1件につき1つの PR で、小さい単位で実装する
 - 進捗はこのリポジトリで管理する。workbench の issue には進捗を書かない
 - ブランチは `main` と `feature/<内容を表す短い英語>` だけで運用し、`main` に直接コミット・push しない。マージ後、feature ブランチは削除する
+
+## 開発
+
+- Node.js 24（`.nvmrc`）。`nvm use` してから `npm install`
+- PR を出す前に `npm run lint`、`npm run typecheck`、`npm test`、`npm run build` を通す（CI も同じものを実行する）
+- 実機（Cornix LP）が要る確認は AI にはできない。ユーザーに手順を示して確かめてもらう
 
 ## リリース時
 
