@@ -24,6 +24,7 @@ Cornix LP（分割キーボード、RMK + Vial）のカスタムキーマッピ�
 
 - Node.js 24（`.nvmrc`）。`nvm use` してから `npm install`
 - PR を出す前に `npm run lint`、`npm run typecheck`、`npm test`、`npm run build` を通す（CI も同じものを実行する）
+- `main` にマージすると GitHub Actions（`.github/workflows/deploy.yml`）が GitHub Pages へデプロイする
 - 実機（Cornix LP）が要る確認は AI にはできない。ユーザーに手順を示して確かめてもらう
 
 ## リリース時
