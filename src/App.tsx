@@ -1,20 +1,19 @@
-import { isWebHidSupported } from './browserSupport.ts'
+import { ConnectionPanel } from './ui/ConnectionPanel.tsx'
+import { UnsupportedBrowserWarning } from './ui/UnsupportedBrowserWarning.tsx'
+import { useConnection } from './ui/useConnection.ts'
 
 // develop のビルドは /cornix-keymapper/dev/ で配信される（.github/workflows/deploy.yml）
 const isDevSite = import.meta.env.BASE_URL.endsWith('/dev/')
 
 function App() {
+  const { state, open, close } = useConnection()
+
   return (
     <>
-      {!isWebHidSupported() && (
-        <p className="warning" role="alert">
-          このブラウザーではキーボードに接続できません。デスクトップ版の Chrome または Edge
-          で開いてください。
-        </p>
-      )}
+      <UnsupportedBrowserWarning />
       <main>
         <h1>Cornix キーマッパー{isDevSite && <span className="badge">開発版</span>}</h1>
-        <p>準備中です。</p>
+        <ConnectionPanel state={state} onConnect={open} onDisconnect={close} />
       </main>
     </>
   )
