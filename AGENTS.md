@@ -18,7 +18,26 @@ Cornix LP（分割キーボード、RMK + Vial）のカスタムキーマッピ�
 
 - 作業はこのリポジトリの issue に1作業1件で切り、1件につき1つの PR で、小さい単位で実装する
 - 進捗はこのリポジトリで管理する。workbench の issue には進捗を書かない
-- ブランチは `main` と `feature/<内容を表す短い英語>` だけで運用し、`main` に直接コミット・push しない。マージ後、feature ブランチは削除する
+
+## ブランチ運用（git flow）
+
+`~/dev/AGENTS.md` の「`main` と feature ブランチだけ」とは違い、このリポジトリは `develop` を挟む。このリポジトリではこの節に従う。
+
+| ブランチ | 役割 |
+| --- | --- |
+| `main` | リリース済みの状態。ここへのマージで GitHub Pages に公開される |
+| `develop` | 開発の本線。リポジトリの既定のブランチ。次のリリースに入る変更を集める |
+| `feature/<内容を表す短い英語>` | 1つの作業。`develop` から切り、`develop` へ戻す |
+
+- `main` と `develop` に直接コミット・push しない。変更は必ず PR を通す（GitHub のルールセットでも止めている）
+- 作業は、最新の `develop` から feature ブランチを切って始める（例: `feature/webhid-transport`）。修正や文書だけの変更でも接頭辞は `feature/` にそろえる
+- PR は `develop` に向け、[.github/pull_request_template.md](.github/pull_request_template.md) の見出しに沿って書く。対応する issue を `Closes #NN` で結び付ける
+- feature → `develop` は squash でマージする（1つの PR が `develop` の1コミットになり、PR のタイトルがコミットメッセージになる）
+- リリースは `develop` → `main` の PR で行い、マージコミットでマージする（squash すると `main` と `develop` の履歴が分かれ、次のリリースで衝突する）
+- `main` に直接入れる変更は作らない。急ぎの修正も feature → `develop` → `main` の順に通す
+- CI が通り、ユーザーがレビューしてからマージする。マージはユーザーが行う
+- マージ後、feature ブランチは削除する（GitHub 側は自動で削除される。手元は `git branch -d`）
+- 作業中に `develop` が進んだら、`develop` を feature ブランチにマージして取り込む（push 済みのブランチを rebase しない）
 
 ## 開発
 
@@ -29,7 +48,8 @@ Cornix LP（分割キーボード、RMK + Vial）のカスタムキーマッピ�
 
 ## リリース時
 
-1. docs/spec.md の完了条件を1つずつ実際に確かめる
-2. 元の issue（usa0w0/workbench#3）本文の完了条件を docs/spec.md の内容に合わせる
-3. 満たしているものにチェックを付け、確認方法をコメントする。満たしていないものがあれば、チェックを付けずにその旨をコメントする
-4. close と shipped はユーザーが行う
+1. `develop` から `main` への PR を出す。マージすると公開される
+2. 公開されたサイトで、docs/spec.md の完了条件を1つずつ実際に確かめる
+3. 元の issue（usa0w0/workbench#3）本文の完了条件を docs/spec.md の内容に合わせる
+4. 満たしているものにチェックを付け、確認方法をコメントする。満たしていないものがあれば、チェックを付けずにその旨をコメントする
+5. close と shipped はユーザーが行う
