@@ -17,6 +17,9 @@ Cornix LP（分割キーボード、RMK + Vial）のカスタムキーマッピ�
 ## 進め方
 
 - 作業はこのリポジトリの issue に1作業1件で切り、1件につき1つの PR で、小さい単位で実装する
+- 作業順は、issue 同士のブロック関係（blocked by）で表す。docs には作業計画を書かない
+  - 着手してよいのは、ブロックしている issue がすべて close された issue。一覧: `gh issue list --search "-is:blocked"`
+  - issue を切る時に、先に終わっている必要がある issue を `--blocked-by` で付け、その issue を待つべき既存の issue には `gh issue edit <番号> --add-blocked-by` で足す
 - 進捗はこのリポジトリで管理する。workbench の issue には進捗を書かない
 
 ## ブランチ運用（git flow）
