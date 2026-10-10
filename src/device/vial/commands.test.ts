@@ -107,3 +107,14 @@ test('レイヤー数が 0 や大きすぎる時は unexpected-response で失�
     await expect(getLayerCount(request)).rejects.toMatchObject({ kind: 'unexpected-response' })
   }
 })
+
+test('キーマップが、読める大きさを超える時は、読み始めずに unexpected-response で失敗する', async () => {
+  const sent: number[][] = []
+  const request: Requester = async (payload) => {
+    sent.push(payload)
+    return new Uint8Array(REPORT_SIZE)
+  }
+  // 32 レイヤー × 255 行 × 255 列 × 2 バイトは、2 バイトで指せる範囲を超える
+  await expect(getKeymap(request, 32, 255, 255)).rejects.toMatchObject({ kind: 'unexpected-response' })
+  expect(sent).toHaveLength(0)
+})

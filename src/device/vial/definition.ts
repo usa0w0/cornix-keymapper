@@ -7,6 +7,9 @@ export async function decompressDefinition(compressed: Uint8Array<ArrayBuffer>):
   return JSON.parse(await new Response(stream).text())
 }
 
+const isByteCount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 0xff
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -19,8 +22,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function parseDefinition(raw: unknown): LayoutDefinition {
   if (!isRecord(raw) || !isRecord(raw.matrix)) throw new Error('定義に matrix がない')
   const { rows, cols } = raw.matrix
-  if (typeof rows !== 'number' || typeof cols !== 'number') {
-    throw new Error('定義の matrix に rows と cols がない')
+  // 行と列、エンコーダーの番号は、コマンドの中で 1 バイトで送る。本体から来た値なので、範囲を確かめる
+  if (!isByteCount(rows) || !isByteCount(cols)) {
+    throw new Error('定義の matrix の rows と cols が、1〜255 の整数でない')
   }
 
   let encoderCount = 0
@@ -30,8 +34,11 @@ export function parseDefinition(raw: unknown): LayoutDefinition {
       if (typeof item !== 'string') continue
       const labels = item.split('\n')
       if (labels[9] !== 'e') continue
-      const index = Number.parseInt(labels[0], 10)
-      if (Number.isInteger(index)) encoderCount = Math.max(encoderCount, index + 1)
+      const index = Number(labels[0].split(',')[0])
+      if (!Number.isInteger(index) || index < 0 || index > 0xff) {
+        throw new Error(`定義のエンコーダーの番号が、0〜255 の整数でない（${labels[0]}）`)
+      }
+      encoderCount = Math.max(encoderCount, index + 1)
     }
   }
   return { rows, cols, encoderCount, raw }

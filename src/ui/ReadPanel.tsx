@@ -22,10 +22,10 @@ type ReadState =
 export function ReadPanel({ device }: { device: KeyboardDevice }) {
   const [state, setState] = useState<ReadState>({ status: 'idle' })
   const [previous, setPrevious] = useState<KeyboardSnapshot | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState<'done' | 'failed' | null>(null)
 
   const read = async () => {
-    setCopied(false)
+    setCopied(null)
     setState({ status: 'reading', progress: null })
     const before = device.exchangeCount()
     try {
@@ -47,8 +47,13 @@ export function ReadPanel({ device }: { device: KeyboardDevice }) {
   }
 
   const copy = async (report: ReadReport) => {
-    await navigator.clipboard.writeText(JSON.stringify(report))
-    setCopied(true)
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(report))
+      setCopied('done')
+    } catch {
+      // ブラウザーの設定や、ページにフォーカスがない時は、コピーできない
+      setCopied('failed')
+    }
   }
 
   const save = (report: ReadReport) => {
@@ -74,7 +79,13 @@ export function ReadPanel({ device }: { device: KeyboardDevice }) {
             <button type="button" onClick={() => copy(state.report)}>
               結果をコピー
             </button>
-            {copied && <span role="status">コピーしました</span>}
+            {copied && (
+              <span role="status">
+                {copied === 'done'
+                  ? 'コピーしました'
+                  : 'コピーできませんでした。「結果をファイルに保存」を使ってください'}
+              </span>
+            )}
           </>
         )}
       </div>

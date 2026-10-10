@@ -25,6 +25,8 @@ const KEYMAP_CHUNK = 28
 const DEFINITION_BLOCK = 32
 /** 圧縮されたレイアウト定義の大きさの上限。実物は数 kB なので、十分に大きい値 */
 const MAX_DEFINITION_SIZE = 64 * 1024
+/** キーマップ全体の大きさの上限。読む位置を 2 バイトで送るため */
+const MAX_KEYMAP_SIZE = 0x10000
 /** レイヤー数の上限。Vial のキーコードで指せるレイヤーは 32 まで */
 const MAX_LAYER_COUNT = 32
 
@@ -85,6 +87,10 @@ export async function getKeymap(
 ): Promise<number[][]> {
   const keysPerLayer = rows * cols
   const size = layerCount * keysPerLayer * 2
+  // 読む位置は 2 バイトで送るので、それを超える大きさは読めない
+  if (!Number.isInteger(size) || size <= 0 || size > MAX_KEYMAP_SIZE) {
+    throw new DeviceError('unexpected-response')
+  }
   const buffer = new Uint8Array(size)
   for (let offset = 0; offset < size; offset += KEYMAP_CHUNK) {
     const length = Math.min(KEYMAP_CHUNK, size - offset)
