@@ -155,6 +155,7 @@ test('読み出しの途中で失敗したら、どこで失敗したかを添�
   const error = await device.read().catch((e: unknown) => e)
   expect(error).toBeInstanceOf(DeviceError)
   expect(error).toMatchObject({ kind: 'unexpected-response', step: 'Tap Dance' })
+})
 
 test('切断の登録より前に機器がなくなっていたら、登録した時にすぐ知らせる', async () => {
   const hid = new FakeHid()
