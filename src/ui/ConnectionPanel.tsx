@@ -41,9 +41,7 @@ function statusText(state: ConnectionState): string {
       return '未接続'
     case 'connecting':
       return '接続中…'
-    case 'connected': {
-      const name = state.connection.device.productName || '名前のない機器'
-      return `接続済み: ${name}（VIA プロトコル ${state.connection.viaProtocolVersion}）`
-    }
+    case 'connected':
+      return `接続済み: ${state.device.name}（${state.device.protocol}）`
   }
 }
