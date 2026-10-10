@@ -118,3 +118,26 @@ test('こちらから切断した後は、切断を知らせない', async () =>
   hid.disconnect(hidDevice)
   expect(notified).toBe(0)
 })
+
+test('切断の登録より前に機器がなくなっていたら、登録した時にすぐ知らせる', async () => {
+  const hid = new FakeHid()
+  const hidDevice = new FakeHidDevice([0x01, 0x00, 0x09])
+  const device = await openVialDevice(hidDevice, hid)
+
+  hid.disconnect(hidDevice)
+  let notified = 0
+  device.onDisconnect(() => notified++)
+  expect(notified).toBe(1)
+})
+
+test('こちらから切断した後に登録しても、切断を知らせない', async () => {
+  const hid = new FakeHid()
+  const hidDevice = new FakeHidDevice([0x01, 0x00, 0x09])
+  const device = await openVialDevice(hidDevice, hid)
+
+  await device.disconnect()
+  hid.disconnect(hidDevice)
+  let notified = 0
+  device.onDisconnect(() => notified++)
+  expect(notified).toBe(0)
+})
