@@ -69,6 +69,8 @@ export class VialDevice implements KeyboardDevice {
   private readonly listeners = new Set<() => void>()
   private readonly log: ExchangeLog
   private closed = false
+  // こちらから切断したのではなく、機器がなくなった
+  private lost = false
 
   constructor(
     device: RawHidDevice,
@@ -87,6 +89,11 @@ export class VialDevice implements KeyboardDevice {
   }
 
   onDisconnect(listener: () => void): () => void {
+    // 接続してから登録までの間に機器がなくなっていたら、すぐ知らせる
+    if (this.lost) {
+      listener()
+      return () => {}
+    }
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
@@ -202,6 +209,7 @@ export class VialDevice implements KeyboardDevice {
   private readonly handleDisconnect: HidDisconnectListener = (event) => {
     if (event.device !== this.device) return
     if (!this.release()) return
+    this.lost = true
     for (const listener of this.listeners) listener()
   }
 }
