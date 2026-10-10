@@ -6,7 +6,6 @@ import {
   type ReadProgress,
 } from '../device/types.ts'
 import { buildReadReport, countDifferences, hex16, type ReadReport } from './readReport.ts'
-import { describeError } from './useConnection.ts'
 
 type ReadState =
   | { status: 'idle' }
@@ -38,8 +37,7 @@ export function ReadPanel({ device }: { device: KeyboardDevice }) {
       setState({ status: 'done', report })
     } catch (error) {
       // 読みかけの内容は出さない
-      const step = error instanceof DeviceError && error.step ? `「${error.step}」の読み出し中: ` : ''
-      setState({ status: 'failed', message: step + describeError(error) })
+      setState({ status: 'failed', message: describeReadError(error) })
     }
   }
 
@@ -91,7 +89,25 @@ export function ReadPanel({ device }: { device: KeyboardDevice }) {
   )
 }
 
-function ReadResult({ report }: { report: ReadReport }) {
+/** 読み出しの失敗を、どこで・なぜ・次に何をするか、の順に説明する */
+export function describeReadError(error: unknown): string {
+  if (!(error instanceof DeviceError)) {
+    return `原因が分かりません。（${error instanceof Error ? error.message : String(error)}）`
+  }
+  const where = error.step ? `「${error.step}」を読んでいる途中で、` : ''
+  switch (error.kind) {
+    case 'timeout':
+      return `${where}キーボードから応答がなくなりました。電源と接続を確かめて、「もう一度読み出す」を押してください。`
+    case 'send-failed':
+      return `${where}キーボードへ送信できませんでした。つなぎ直してから、接続し直してください。`
+    case 'disconnected':
+      return `${where}キーボードとの接続が切れました。つなぎ直してから、接続し直してください。`
+    case 'unexpected-response':
+      return `${where}キーボードから想定と違う応答が返りました。Vial など他のアプリやタブで開いている場合は閉じて、「もう一度読み出す」を押してください。`
+  }
+}
+
+export function ReadResult({ report }: { report: ReadReport }) {
   const { snapshot, stats, differencesFromPrevious } = report
   const { layout, capabilities } = snapshot
   return (
