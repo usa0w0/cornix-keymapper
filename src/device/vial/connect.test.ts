@@ -5,7 +5,7 @@ import { REPORT_SIZE, type HidDeviceLike } from './transport.ts'
 import { sampleState } from './testing/sampleState.ts'
 import { definitionJson } from './testing/definitionFixture.ts'
 import { respond } from './testing/simulatedKeyboard.ts'
-import type { HidEvents, RawHidDevice } from './vialDevice.ts'
+import { ExchangeLog, type HidEvents, type RawHidDevice } from './vialDevice.ts'
 
 const collection = (usagePage: number, usage: number, reportId?: number): HIDCollectionInfo => ({
   usagePage,
@@ -178,4 +178,20 @@ test('こちらから切断した後に登録しても、切断を知らせな�
   let notified = 0
   device.onDisconnect(() => notified++)
   expect(notified).toBe(0)
+})
+
+test('通信の記録は、上限を超えて古いものを捨てた後も、ある時点より後の分を正しく返す', () => {
+  const log = new ExchangeLog(3)
+  const record = (byte: number) => log.record(Uint8Array.of(byte), Uint8Array.of(byte), 1)
+  ;[1, 2, 3].forEach(record)
+  const before = log.count()
+  ;[4, 5].forEach(record)
+
+  expect(log.count()).toBe(5)
+  expect(log.list(before).map((e) => e.request)).toEqual(['04', '05'])
+  // 上限に達した後の読み出しでも、その読み出しの分だけが返る
+  const later = log.count()
+  record(6)
+  expect(log.list(later).map((e) => e.request)).toEqual(['06'])
+  expect(log.list()).toHaveLength(3)
 })

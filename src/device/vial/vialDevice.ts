@@ -32,14 +32,30 @@ const toHex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).pad
 /** 診断用の通信の記録。Transport の onExchange に record を渡して使う */
 export class ExchangeLog {
   private readonly records: ExchangeRecord[] = []
+  private readonly capacity: number
+  // 古いものから捨てた数。記録の通し番号を、捨てた後も変えないために持つ
+  private dropped = 0
+
+  constructor(capacity = MAX_EXCHANGES) {
+    this.capacity = capacity
+  }
 
   readonly record = (request: Uint8Array, response: Uint8Array | null, ms: number): void => {
     this.records.push({ request: toHex(request), response: response && toHex(response), ms: Math.round(ms) })
-    if (this.records.length > MAX_EXCHANGES) this.records.shift()
+    if (this.records.length > this.capacity) {
+      this.records.shift()
+      this.dropped++
+    }
   }
 
-  list(): ExchangeRecord[] {
-    return [...this.records]
+  /** これまでに記録した数。捨てた分も数える */
+  count(): number {
+    return this.dropped + this.records.length
+  }
+
+  /** 通し番号が since 以降の記録。すでに捨てた分は含まれない */
+  list(since = 0): ExchangeRecord[] {
+    return this.records.slice(Math.max(0, since - this.dropped))
   }
 }
 
@@ -98,8 +114,12 @@ export class VialDevice implements KeyboardDevice {
     return () => this.listeners.delete(listener)
   }
 
-  exchanges(): ExchangeRecord[] {
-    return this.log.list()
+  exchangeCount(): number {
+    return this.log.count()
+  }
+
+  exchanges(since?: number): ExchangeRecord[] {
+    return this.log.list(since)
   }
 
   async read(onProgress?: (progress: ReadProgress) => void): Promise<KeyboardSnapshot> {

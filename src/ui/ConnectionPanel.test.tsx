@@ -13,6 +13,7 @@ const device: KeyboardDevice = {
   onDisconnect: () => () => {},
   disconnect: async () => {},
   read: () => Promise.reject(new Error('使わない')),
+  exchangeCount: () => 0,
   exchanges: () => [],
 }
 

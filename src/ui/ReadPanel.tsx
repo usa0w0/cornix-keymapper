@@ -27,7 +27,7 @@ export function ReadPanel({ device }: { device: KeyboardDevice }) {
   const read = async () => {
     setCopied(false)
     setState({ status: 'reading', progress: null })
-    const before = device.exchanges().length
+    const before = device.exchangeCount()
     try {
       const snapshot = await device.read((progress) => setState({ status: 'reading', progress }))
       const report = buildReadReport({
@@ -36,7 +36,7 @@ export function ReadPanel({ device }: { device: KeyboardDevice }) {
         device: { name: device.name, protocol: device.protocol },
         snapshot,
         differencesFromPrevious: previous && countDifferences(previous, snapshot),
-        exchanges: device.exchanges().slice(before),
+        exchanges: device.exchanges(before),
       })
       setPrevious(snapshot)
       setState({ status: 'done', report })
@@ -74,7 +74,7 @@ export function ReadPanel({ device }: { device: KeyboardDevice }) {
             <button type="button" onClick={() => copy(state.report)}>
               結果をコピー
             </button>
-            {copied && <span>コピーしました</span>}
+            {copied && <span role="status">コピーしました</span>}
           </>
         )}
       </div>

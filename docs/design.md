@@ -116,7 +116,8 @@ interface KeyboardDevice {
   onDisconnect(listener: () => void): () => void         // 切断の通知
   read(onProgress): Promise<KeyboardSnapshot>
   write(operations: WriteOperation[], onProgress): Promise<void>   // 渡された順に書く（未実装）
-  exchanges(): ExchangeRecord[]                          // 診断用。接続してからの通信の記録
+  exchangeCount(): number                                // 診断用。接続してからの通信の回数
+  exchanges(since?: number): ExchangeRecord[]            // 診断用。通信の記録（since 以降の分）
   disconnect(): Promise<void>
 }
 

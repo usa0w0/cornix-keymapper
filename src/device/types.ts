@@ -88,8 +88,10 @@ export interface KeyboardDevice {
   onDisconnect(listener: () => void): () => void
   /** 本体の設定をまとめて読む。途中で失敗したら、読んだ内容は捨てて DeviceError を投げる */
   read(onProgress?: (progress: ReadProgress) => void): Promise<KeyboardSnapshot>
-  /** 診断用。接続してからの通信の記録 */
-  exchanges(): ExchangeRecord[]
+  /** 診断用。接続してからの通信の回数。記録を古いものから捨てても減らない */
+  exchangeCount(): number
+  /** 診断用。通信の記録。since には、その時点の exchangeCount を渡すと、それ以降の分だけを返す */
+  exchanges(since?: number): ExchangeRecord[]
   disconnect(): Promise<void>
 }
 
