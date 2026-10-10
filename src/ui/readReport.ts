@@ -1,5 +1,5 @@
 // 読み出しの結果を、画面と書き出し用にまとめる
-import type { ExchangeRecord, KeyboardSnapshot } from '../device/types.ts'
+import { DeviceError, type ExchangeRecord, type KeyboardSnapshot } from '../device/types.ts'
 
 export interface ExchangeStats {
   count: number
@@ -79,5 +79,23 @@ export function buildReadReport(input: {
     exchanges: input.exchanges.map(
       (e) => `${trimZeros(e.request)}>${e.response === null ? '-' : trimZeros(e.response)}@${e.ms}`,
     ),
+  }
+}
+
+/** 読み出しの失敗を、どこで・なぜ・次に何をするか、の順に説明する */
+export function describeReadError(error: unknown): string {
+  if (!(error instanceof DeviceError)) {
+    return `原因が分かりません。（${error instanceof Error ? error.message : String(error)}）`
+  }
+  const where = error.step ? `「${error.step}」を読んでいる途中で、` : ''
+  switch (error.kind) {
+    case 'timeout':
+      return `${where}キーボードから応答がなくなりました。電源と接続を確かめて、「もう一度読み出す」を押してください。`
+    case 'send-failed':
+      return `${where}キーボードへ送信できませんでした。つなぎ直してから、接続し直してください。`
+    case 'disconnected':
+      return `${where}キーボードとの接続が切れました。つなぎ直してから、接続し直してください。`
+    case 'unexpected-response':
+      return `${where}キーボードから想定と違う応答が返りました。Vial など他のアプリやタブで開いている場合は閉じて、「もう一度読み出す」を押してください。`
   }
 }

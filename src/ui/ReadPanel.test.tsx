@@ -1,8 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, test } from 'vitest'
 import { DeviceError, type KeyboardSnapshot } from '../device/types.ts'
-import { describeReadError, ReadResult } from './ReadPanel.tsx'
-import { buildReadReport } from './readReport.ts'
+import { ReadResult } from './ReadPanel.tsx'
+import { buildReadReport, describeReadError } from './readReport.ts'
 import { formatDuration } from './useConnection.ts'
 
 const snapshot: KeyboardSnapshot = {
