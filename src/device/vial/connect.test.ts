@@ -2,7 +2,10 @@ import { expect, test } from 'vitest'
 import { DeviceError } from '../types.ts'
 import { findReportId, openVialDevice } from './connect.ts'
 import { REPORT_SIZE, type HidDeviceLike } from './transport.ts'
-import type { HidEvents, RawHidDevice } from './vialDevice.ts'
+import { sampleState } from './testing/sampleState.ts'
+import { definitionJson } from './testing/definitionFixture.ts'
+import { respond } from './testing/simulatedKeyboard.ts'
+import { ExchangeLog, type HidEvents, type RawHidDevice } from './vialDevice.ts'
 
 const collection = (usagePage: number, usage: number, reportId?: number): HIDCollectionInfo => ({
   usagePage,
@@ -18,10 +21,17 @@ class FakeHidDevice implements RawHidDevice, HidDeviceLike {
   productName = 'Cornix'
   collections = [collection(0xff60, 0x61)]
   private listeners = new Set<InputListener>()
-  private readonly response: number[]
+  private readonly reply: (request: Uint8Array) => Uint8Array
 
-  constructor(response: number[]) {
-    this.response = response
+  constructor(reply: number[] | ((request: Uint8Array) => Uint8Array)) {
+    this.reply =
+      typeof reply === 'function'
+        ? reply
+        : () => {
+            const report = new Uint8Array(REPORT_SIZE)
+            report.set(reply)
+            return report
+          }
   }
 
   async open(): Promise<void> {
@@ -32,9 +42,8 @@ class FakeHidDevice implements RawHidDevice, HidDeviceLike {
     this.opened = false
   }
 
-  async sendReport(): Promise<void> {
-    const report = new Uint8Array(REPORT_SIZE)
-    report.set(this.response)
+  async sendReport(_reportId: number, data: Uint8Array<ArrayBuffer>): Promise<void> {
+    const report = this.reply(data)
     queueMicrotask(() => {
       for (const listener of this.listeners) listener({ data: new DataView(report.buffer) })
     })
@@ -119,6 +128,35 @@ test('こちらから切断した後は、切断を知らせない', async () =>
   expect(notified).toBe(0)
 })
 
+test('本体の設定をまとめて読み、進み具合を知らせ、通信を記録する', async () => {
+  const state = sampleState()
+  const device = await openVialDevice(new FakeHidDevice((request) => respond(state, request)), new FakeHid())
+  const steps: string[] = []
+  const snapshot = await device.read((progress) => steps.push(progress.step))
+
+  expect(snapshot).toEqual({
+    uid: '0123456789abcdef',
+    layout: { rows: 2, cols: 3, encoderCount: 1, raw: definitionJson },
+    capabilities: { viaProtocol: 9, vialProtocol: 6, layerCount: 3, tapDanceCount: 2, comboCount: 1 },
+    keymap: state.keymap,
+    encoders: state.encoders,
+    tapDances: state.tapDances,
+    combos: state.combos,
+  })
+  expect(new Set(steps)).toContain('キーマップ')
+  const exchanges = device.exchanges()
+  expect(exchanges[0]).toMatchObject({ request: expect.stringMatching(/^01/), response: expect.stringMatching(/^010009/) })
+  expect(exchanges.length).toBeGreaterThan(10)
+})
+
+test('読み出しの途中で失敗したら、どこで失敗したかを添えて失敗する', async () => {
+  const state = { ...sampleState(), failTapDanceAt: 1 }
+  const device = await openVialDevice(new FakeHidDevice((request) => respond(state, request)), new FakeHid())
+  const error = await device.read().catch((e: unknown) => e)
+  expect(error).toBeInstanceOf(DeviceError)
+  expect(error).toMatchObject({ kind: 'unexpected-response', step: 'Tap Dance' })
+})
+
 test('切断の登録より前に機器がなくなっていたら、登録した時にすぐ知らせる', async () => {
   const hid = new FakeHid()
   const hidDevice = new FakeHidDevice([0x01, 0x00, 0x09])
@@ -140,4 +178,20 @@ test('こちらから切断した後に登録しても、切断を知らせな�
   let notified = 0
   device.onDisconnect(() => notified++)
   expect(notified).toBe(0)
+})
+
+test('通信の記録は、上限を超えて古いものを捨てた後も、ある時点より後の分を正しく返す', () => {
+  const log = new ExchangeLog(3)
+  const record = (byte: number) => log.record(Uint8Array.of(byte), Uint8Array.of(byte), 1)
+  ;[1, 2, 3].forEach(record)
+  const before = log.count()
+  ;[4, 5].forEach(record)
+
+  expect(log.count()).toBe(5)
+  expect(log.list(before).map((e) => e.request)).toEqual(['04', '05'])
+  // 上限に達した後の読み出しでも、その読み出しの分だけが返る
+  const later = log.count()
+  record(6)
+  expect(log.list(later).map((e) => e.request)).toEqual(['06'])
+  expect(log.list()).toHaveLength(3)
 })

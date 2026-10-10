@@ -1,5 +1,6 @@
 import type { DeviceConnector } from './device/types.ts'
 import { ConnectionPanel } from './ui/ConnectionPanel.tsx'
+import { ReadPanel } from './ui/ReadPanel.tsx'
 import { UnsupportedBrowserWarning } from './ui/UnsupportedBrowserWarning.tsx'
 import { useConnection } from './ui/useConnection.ts'
 
@@ -15,6 +16,8 @@ function App({ connector }: { connector: DeviceConnector }) {
       <main>
         <h1>Cornix キーマッパー{isDevSite && <span className="badge">開発版</span>}</h1>
         <ConnectionPanel state={state} onConnect={open} onDisconnect={close} />
+        {/* 機器が替わったら、前の読み出しの結果を捨てる */}
+        {state.status === 'connected' && <ReadPanel key={state.device.name} device={state.device} />}
       </main>
     </>
   )

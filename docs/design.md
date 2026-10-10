@@ -64,6 +64,7 @@ src/
       commands.ts    VIA / Vial のコマンド
       definition.ts  レイアウト定義（XZ 圧縮の JSON）の展開と解釈
       vialDevice.ts  KeyboardDevice の実装
+      testing/       テスト用。要求に応答を返す、まねの本体
     fake/            メモリ上の偽の機器。失敗をわざと起こせる
   model/             純粋なロジック（React にも WebHID にも依存しない）
     keycodes.ts      Vial のキーコード（数値・名前）と動作（Action）の相互変換
@@ -98,8 +99,8 @@ src/
 interface KeyboardSnapshot {
   uid: string                      // 機器の識別（バックアップの鍵、.vil の照合）
   layout: LayoutDefinition         // キーの位置と大きさ、エンコーダーの位置
-  capabilities: Capabilities       // レイヤー数、Tap Dance / Combo の枠数、Vial の版
-  keymap: number[][]               // [レイヤー][キー] = キーコード
+  capabilities: Capabilities       // レイヤー数、Tap Dance / Combo の枠数、VIA と Vial の版
+  keymap: number[][]               // [レイヤー][キー] = キーコード。キーの番号は、行列の 行 × 列数 + 列
   encoders: [number, number][][]   // [レイヤー][エンコーダー] = [左回し, 右回し]
   tapDances: TapDanceEntry[]       // 枠数ぶん。4つのキーコードと時間の値
   combos: ComboEntry[]             // 枠数ぶん
@@ -114,7 +115,9 @@ interface KeyboardDevice {
   protocol: string                                       // 画面に出す通信方式（例: VIA プロトコル 9）
   onDisconnect(listener: () => void): () => void         // 切断の通知
   read(onProgress): Promise<KeyboardSnapshot>
-  write(operations: WriteOperation[], onProgress): Promise<void>   // 渡された順に書く
+  write(operations: WriteOperation[], onProgress): Promise<void>   // 渡された順に書く（未実装）
+  exchangeCount(): number                                // 診断用。接続してからの通信の回数
+  exchanges(since?: number): ExchangeRecord[]            // 診断用。通信の記録（since 以降の分）
   disconnect(): Promise<void>
 }
 
@@ -128,6 +131,8 @@ type DeviceErrorKind = 'timeout' | 'send-failed' | 'disconnected' | 'unexpected-
 - スナップショットは「本体の表現」のまま持つ（キーコードは数値、Tap Dance は番号付き）。`.vil` とバックアップも同じスナップショットから作るので、このサイトが解釈できないキーコードも失わない
 - 読み出しをまとめて1つにするのは、バックアップ、照合、差分の単位をそろえるため。書き込みを差分だけにするのは、Bluetooth での通信の回数と、本体が書きかけの状態でいる時間を短くするため
 - `write` は途中で失敗したら、何番目の操作で、どの種類の失敗かを返す
+- `read` は途中で失敗したら、読んだ内容を捨て、どこを読んでいたか（`step`）と失敗の種類を返す
+- `exchanges` は、要求と応答の組と、かかった時間の記録。実機での確認と、テスト用データの採取に使う
 - このサイトで扱わない設定（マクロ、Key Override、QMK Settings）は読まないので、スナップショットに入らない。キーに割り当てられた対象外のキーコード（マクロを呼ぶキーなど）は、`keymap` の数値として残る
 
 ## Vial の通信
@@ -154,8 +159,9 @@ type DeviceErrorKind = 'timeout' | 'send-failed' | 'disconnected' | 'unexpected-
 | Tap Dance と Combo の枠数 | Vial `0xFE 0x0D 0x00` |
 | Tap Dance | Vial `0xFE 0x0D 0x01`（読み）、`0x02`（書き） |
 | Combo | Vial `0xFE 0x0D 0x03`（読み）、`0x04`（書き） |
+| ロックの状態（読むだけ。書き込みにロック解除が要るかを見る） | Vial `0xFE 0x05` |
 
-- レイアウト定義は XZ 圧縮されている。ブラウザーに XZ の展開機能はないため、展開だけを行う小さなライブラリを1つ入れる（候補: `xz-decompress`。実機の定義を展開できるか確かめて決める）
+- レイアウト定義は XZ 圧縮されている。ブラウザーに XZ の展開機能はないため、展開だけを行う小さなライブラリ `xz-decompress` を入れた（WebAssembly を含み、ビルド後の大きさが約 30 kB 増える）。実機の定義を展開できるかは、実機で確かめる
 - 定義の `layouts.keymap`（KLE 形式）から、キーの座標・行列上の位置・エンコーダーを取り出して描画する。配列はコードに持たない
 - マクロ、Key Override、QMK Settings のコマンドは使わない
 
