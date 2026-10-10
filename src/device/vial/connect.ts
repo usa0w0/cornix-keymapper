@@ -1,7 +1,7 @@
 // WebHID での機器選択と接続。USB と Bluetooth で同じ指定を使う
 import { DeviceError, type DeviceConnector } from '../types.ts'
 import { Transport, type HidDeviceLike } from './transport.ts'
-import { VialDevice, type HidEvents, type RawHidDevice } from './vialDevice.ts'
+import { ExchangeLog, VialDevice, type HidEvents, type RawHidDevice } from './vialDevice.ts'
 
 // VIA / Vial の Raw HID インターフェース
 const RAW_HID_USAGE_PAGE = 0xff60
@@ -28,12 +28,13 @@ export async function openVialDevice(
   hid: HidEvents,
 ): Promise<VialDevice> {
   if (!device.opened) await device.open()
-  const transport = new Transport(device, { reportId: findReportId(device) })
+  const log = new ExchangeLog()
+  const transport = new Transport(device, { reportId: findReportId(device), onExchange: log.record })
   try {
     const response = await transport.request([VIA_GET_PROTOCOL_VERSION])
     // 応答の先頭は要求と同じコマンド番号。違えば、別の要求への応答か、VIA でない機器
     if (response[0] !== VIA_GET_PROTOCOL_VERSION) throw new DeviceError('unexpected-response')
-    return new VialDevice(device, hid, transport, (response[1] << 8) | response[2])
+    return new VialDevice(device, hid, transport, (response[1] << 8) | response[2], log)
   } catch (error) {
     transport.close()
     await device.close().catch(() => {})

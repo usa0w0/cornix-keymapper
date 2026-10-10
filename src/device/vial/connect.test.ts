@@ -2,6 +2,9 @@ import { expect, test } from 'vitest'
 import { DeviceError } from '../types.ts'
 import { findReportId, openVialDevice } from './connect.ts'
 import { REPORT_SIZE, type HidDeviceLike } from './transport.ts'
+import { sampleState } from './testing/sampleState.ts'
+import { definitionJson } from './testing/definitionFixture.ts'
+import { respond } from './testing/simulatedKeyboard.ts'
 import type { HidEvents, RawHidDevice } from './vialDevice.ts'
 
 const collection = (usagePage: number, usage: number, reportId?: number): HIDCollectionInfo => ({
@@ -18,10 +21,17 @@ class FakeHidDevice implements RawHidDevice, HidDeviceLike {
   productName = 'Cornix'
   collections = [collection(0xff60, 0x61)]
   private listeners = new Set<InputListener>()
-  private readonly response: number[]
+  private readonly reply: (request: Uint8Array) => Uint8Array
 
-  constructor(response: number[]) {
-    this.response = response
+  constructor(reply: number[] | ((request: Uint8Array) => Uint8Array)) {
+    this.reply =
+      typeof reply === 'function'
+        ? reply
+        : () => {
+            const report = new Uint8Array(REPORT_SIZE)
+            report.set(reply)
+            return report
+          }
   }
 
   async open(): Promise<void> {
@@ -32,9 +42,8 @@ class FakeHidDevice implements RawHidDevice, HidDeviceLike {
     this.opened = false
   }
 
-  async sendReport(): Promise<void> {
-    const report = new Uint8Array(REPORT_SIZE)
-    report.set(this.response)
+  async sendReport(_reportId: number, data: Uint8Array<ArrayBuffer>): Promise<void> {
+    const report = this.reply(data)
     queueMicrotask(() => {
       for (const listener of this.listeners) listener({ data: new DataView(report.buffer) })
     })
@@ -117,4 +126,33 @@ test('こちらから切断した後は、切断を知らせない', async () =>
   expect(hidDevice.opened).toBe(false)
   hid.disconnect(hidDevice)
   expect(notified).toBe(0)
+})
+
+test('本体の設定をまとめて読み、進み具合を知らせ、通信を記録する', async () => {
+  const state = sampleState()
+  const device = await openVialDevice(new FakeHidDevice((request) => respond(state, request)), new FakeHid())
+  const steps: string[] = []
+  const snapshot = await device.read((progress) => steps.push(progress.step))
+
+  expect(snapshot).toEqual({
+    uid: '0123456789abcdef',
+    layout: { rows: 2, cols: 3, encoderCount: 1, raw: definitionJson },
+    capabilities: { viaProtocol: 9, vialProtocol: 6, layerCount: 3, tapDanceCount: 2, comboCount: 1 },
+    keymap: state.keymap,
+    encoders: state.encoders,
+    tapDances: state.tapDances,
+    combos: state.combos,
+  })
+  expect(new Set(steps)).toContain('キーマップ')
+  const exchanges = device.exchanges()
+  expect(exchanges[0]).toMatchObject({ request: expect.stringMatching(/^01/), response: expect.stringMatching(/^010009/) })
+  expect(exchanges.length).toBeGreaterThan(10)
+})
+
+test('読み出しの途中で失敗したら、どこで失敗したかを添えて失敗する', async () => {
+  const state = { ...sampleState(), failTapDanceAt: 1 }
+  const device = await openVialDevice(new FakeHidDevice((request) => respond(state, request)), new FakeHid())
+  const error = await device.read().catch((e: unknown) => e)
+  expect(error).toBeInstanceOf(DeviceError)
+  expect(error).toMatchObject({ kind: 'unexpected-response', step: 'Tap Dance' })
 })
