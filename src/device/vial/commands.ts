@@ -1,6 +1,8 @@
 // VIA / Vial のコマンド。要求のバイト列を作り、応答を読み解く
 // 数値の並びは、キーマップ（VIA）が上位バイト先、Vial のコマンドが下位バイト先
 
+import { DeviceError } from '../types.ts'
+
 /** 要求を送り、応答（32 バイト）を返すもの。Transport.request を渡す */
 export type Requester = (payload: number[]) => Promise<Uint8Array>
 
@@ -21,6 +23,10 @@ const DYNAMIC_COMBO_GET = 0x03
 /** キーマップのまとめ読みで、1回に読めるバイト数（32 バイトの応答から先頭 4 バイトを引いた数） */
 const KEYMAP_CHUNK = 28
 const DEFINITION_BLOCK = 32
+/** 圧縮されたレイアウト定義の大きさの上限。実物は数 kB なので、十分に大きい値 */
+const MAX_DEFINITION_SIZE = 64 * 1024
+/** レイヤー数の上限。Vial のキーコードで指せるレイヤーは 32 まで */
+const MAX_LAYER_COUNT = 32
 
 const u16be = (bytes: Uint8Array, at: number) => (bytes[at] << 8) | bytes[at + 1]
 const u16le = (bytes: Uint8Array, at: number) => bytes[at] | (bytes[at + 1] << 8)
@@ -50,6 +56,9 @@ export async function getCompressedDefinition(
   onBlock?: (done: number, total: number) => void,
 ): Promise<Uint8Array<ArrayBuffer>> {
   const size = u32le(await request([VIAL_PREFIX, VIAL_GET_SIZE]), 0)
+  // 別の要求への応答や、対応していない本体の応答（0xFF で埋まる）を大きさとして読むと、
+  // 巨大な領域を確保して読み続けてしまう
+  if (size === 0 || size > MAX_DEFINITION_SIZE) throw new DeviceError('unexpected-response')
   const blocks = Math.ceil(size / DEFINITION_BLOCK)
   const data = new Uint8Array(blocks * DEFINITION_BLOCK)
   for (let block = 0; block < blocks; block++) {
@@ -61,7 +70,9 @@ export async function getCompressedDefinition(
 }
 
 export async function getLayerCount(request: Requester): Promise<number> {
-  return (await request([VIA_GET_LAYER_COUNT]))[1]
+  const count = (await request([VIA_GET_LAYER_COUNT]))[1]
+  if (count === 0 || count > MAX_LAYER_COUNT) throw new DeviceError('unexpected-response')
+  return count
 }
 
 /** 全レイヤーのキーマップ。[レイヤー][行 × cols + 列] = キーコード */

@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest'
+import { DeviceError } from '../types.ts'
 import {
   getCombo,
   getCompressedDefinition,
@@ -83,4 +84,26 @@ test('Tap Dance と Combo に対応していない本体では、枠数を 0 と
 test('ロックの状態を読む', async () => {
   const request: Requester = async () => Uint8Array.from([1, 0, 0xff, 0xff])
   expect(await getUnlockStatus(request)).toEqual({ unlocked: true, inProgress: false })
+})
+
+test('定義の大きさが 0 や大きすぎる時は、読み続けずに unexpected-response で失敗する', async () => {
+  for (const sizeBytes of [[0, 0, 0, 0], [0xff, 0xff, 0xff, 0xff], [0x01, 0x00, 0x01, 0x00]]) {
+    const sent: number[][] = []
+    const request: Requester = async (payload) => {
+      sent.push(payload)
+      return Uint8Array.from(sizeBytes)
+    }
+    const error = await getCompressedDefinition(request).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(DeviceError)
+    expect(error).toMatchObject({ kind: 'unexpected-response' })
+    // 大きさを聞いた1回だけで止まる
+    expect(sent).toHaveLength(1)
+  }
+})
+
+test('レイヤー数が 0 や大きすぎる時は unexpected-response で失敗する', async () => {
+  for (const count of [0, 33, 0xff]) {
+    const request: Requester = async () => Uint8Array.from([0x11, count])
+    await expect(getLayerCount(request)).rejects.toMatchObject({ kind: 'unexpected-response' })
+  }
 })
