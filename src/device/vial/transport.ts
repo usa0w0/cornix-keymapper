@@ -1,4 +1,5 @@
 // VIA / Vial の HID 通信。32 バイトの要求を1つ送り、32 バイトの応答を1つ受け取る
+import { DeviceError } from '../types.ts'
 
 export const REPORT_SIZE = 32
 
@@ -7,18 +8,6 @@ export interface HidDeviceLike {
   sendReport(reportId: number, data: Uint8Array<ArrayBuffer>): Promise<void>
   addEventListener(type: 'inputreport', listener: (event: { data: DataView }) => void): void
   removeEventListener(type: 'inputreport', listener: (event: { data: DataView }) => void): void
-}
-
-export type TransportErrorKind = 'timeout' | 'send-failed' | 'disconnected'
-
-export class TransportError extends Error {
-  readonly kind: TransportErrorKind
-
-  constructor(kind: TransportErrorKind, options?: ErrorOptions) {
-    super(`transport: ${kind}`, options)
-    this.name = 'TransportError'
-    this.kind = kind
-  }
 }
 
 export interface TransportOptions {
@@ -32,7 +21,7 @@ export interface TransportOptions {
 
 interface Pending {
   resolve: (response: Uint8Array | null) => void
-  reject: (error: TransportError) => void
+  reject: (error: DeviceError) => void
   timer: ReturnType<typeof setTimeout>
 }
 
@@ -70,7 +59,7 @@ export class Transport {
     if (this.closed) return
     this.closed = true
     this.device.removeEventListener('inputreport', this.handleInputReport)
-    this.settle()?.reject(new TransportError('disconnected'))
+    this.settle()?.reject(new DeviceError('disconnected'))
     this.onLateResponsesDrained?.()
   }
 
@@ -87,16 +76,16 @@ export class Transport {
       if (response) return response
       this.lateResponses++
     }
-    throw new TransportError('timeout')
+    throw new DeviceError('timeout')
   }
 
   private sendAndWait(report: Uint8Array<ArrayBuffer>): Promise<Uint8Array | null> {
-    if (this.closed) return Promise.reject(new TransportError('disconnected'))
+    if (this.closed) return Promise.reject(new DeviceError('disconnected'))
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => this.settle()?.resolve(null), this.timeoutMs)
       this.pending = { resolve, reject, timer }
       this.device.sendReport(this.reportId, report).catch((cause: unknown) => {
-        this.settle()?.reject(new TransportError('send-failed', { cause }))
+        this.settle()?.reject(new DeviceError('send-failed', { cause }))
       })
     })
   }

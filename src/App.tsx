@@ -1,3 +1,4 @@
+import type { DeviceConnector } from './device/types.ts'
 import { ConnectionPanel } from './ui/ConnectionPanel.tsx'
 import { UnsupportedBrowserWarning } from './ui/UnsupportedBrowserWarning.tsx'
 import { useConnection } from './ui/useConnection.ts'
@@ -5,8 +6,8 @@ import { useConnection } from './ui/useConnection.ts'
 // develop のビルドは /cornix-keymapper/dev/ で配信される（.github/workflows/deploy.yml）
 const isDevSite = import.meta.env.BASE_URL.endsWith('/dev/')
 
-function App() {
-  const { state, open, close } = useConnection()
+function App({ connector }: { connector: DeviceConnector }) {
+  const { state, open, close } = useConnection(connector)
 
   return (
     <>
