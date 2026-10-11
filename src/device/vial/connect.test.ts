@@ -6,6 +6,10 @@ import { sampleState } from './testing/sampleState.ts'
 import { definitionJson } from './testing/definitionFixture.ts'
 import { respond } from './testing/simulatedKeyboard.ts'
 import { ExchangeLog, type HidEvents, type RawHidDevice } from './vialDevice.ts'
+// 実機（Cornix LP、ファームウェア V1.12）から 2026-10-12 に取った記録。UID だけ、にせの値に置き換えてある
+import cornixBluetooth from './testing/cornix/bluetooth.json'
+import cornixUsb from './testing/cornix/usb.json'
+import cornixVil from './testing/cornix/cornix.vil?raw'
 
 const collection = (usagePage: number, usage: number, reportId?: number): HIDCollectionInfo => ({
   usagePage,
@@ -194,4 +198,83 @@ test('通信の記録は、上限を超えて古いものを捨てた後も、�
   record(6)
   expect(log.list(later).map((e) => e.request)).toEqual(['06'])
   expect(log.list()).toHaveLength(3)
+})
+
+const fromHex = (hex: string) =>
+  Uint8Array.from(hex.match(/../g) ?? [], (byte) => Number.parseInt(byte, 16))
+
+/** 記録（「要求>応答@ミリ秒」）にある要求に、記録どおりの応答を返す */
+function replay(exchanges: string[]): (request: Uint8Array) => Uint8Array {
+  const pad = (hex: string) => hex.padEnd(REPORT_SIZE * 2, '0')
+  const responses = new Map(
+    exchanges.map((line) => {
+      const [request, response] = line.replace(/@.*$/, '').split('>')
+      return [pad(request), fromHex(pad(response))] as const
+    }),
+  )
+  return (request) => {
+    const key = Array.from(request, (byte) => byte.toString(16).padStart(2, '0')).join('')
+    const response = responses.get(key)
+    if (!response) throw new Error(`記録にない要求: ${key}`)
+    return response
+  }
+}
+
+test.each([
+  ['USB', cornixUsb],
+  ['Bluetooth', cornixBluetooth],
+])('実機の通信の記録（%s）から、その時と同じ内容を読み出せる', async (_name, recorded) => {
+  const device = await openVialDevice(new FakeHidDevice(replay(recorded.exchanges)), new FakeHid())
+  const snapshot = await device.read()
+
+  expect(snapshot).toEqual(recorded.snapshot)
+  expect(snapshot.layout).toMatchObject({ rows: 8, cols: 7, encoderCount: 2 })
+  expect(snapshot.capabilities).toEqual({
+    viaProtocol: 9,
+    vialProtocol: 6,
+    layerCount: 10,
+    tapDanceCount: 32,
+    comboCount: 32,
+  })
+})
+
+test('実機の読み出しは、同じ時に Vial で保存した .vil と、同じ並び順で対応する', () => {
+  const { snapshot } = cornixUsb
+  const vil = JSON.parse(cornixVil) as {
+    layout: (string | number)[][][]
+    encoder_layout: string[][][]
+    tap_dance: [string, string, string, string, number][]
+    combo: string[][]
+  }
+  // .vil はキーコードを名前で持つ。同じ名前がいつも同じ数値に当たれば、並び順が合っている
+  const valueOf = new Map<string | number, number>()
+  const mismatches: string[] = []
+  const pair = (names: (string | number)[], values: number[]) => {
+    expect(names).toHaveLength(values.length)
+    names.forEach((name, i) => {
+      const known = valueOf.get(name) ?? values[i]
+      valueOf.set(name, known)
+      if (known !== values[i]) mismatches.push(`${name}: ${known} と ${values[i]}`)
+    })
+  }
+
+  expect(vil.layout).toHaveLength(snapshot.keymap.length)
+  vil.layout.forEach((layer, i) => pair(layer.flat(), snapshot.keymap[i]))
+  vil.encoder_layout.forEach((layer, i) => pair(layer.flat(), snapshot.encoders[i].flat()))
+  expect(vil.tap_dance).toHaveLength(snapshot.tapDances.length)
+  vil.tap_dance.forEach(([onTap, onHold, onDoubleTap, onTapHold, tappingTerm], i) => {
+    const entry = snapshot.tapDances[i]
+    pair([onTap, onHold, onDoubleTap, onTapHold], [entry.onTap, entry.onHold, entry.onDoubleTap, entry.onTapHold])
+    expect(tappingTerm).toBe(entry.tappingTerm)
+  })
+  expect(vil.combo).toHaveLength(snapshot.combos.length)
+  vil.combo.forEach((names, i) => pair(names, [...snapshot.combos[i].keys, snapshot.combos[i].output]))
+
+  expect(mismatches).toEqual([])
+  // キーのない位置は .vil では -1、本体では 0
+  expect(valueOf.get(-1)).toBe(0)
+  expect(valueOf.get('MO(2)')).toBe(0x5222)
+  expect(valueOf.get('OSL(1)')).toBe(0x5281)
+  expect(valueOf.get('TD(0)')).toBe(0x5700)
+  expect(valueOf.get('USER00')).toBe(0x7e00)
 })
