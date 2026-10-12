@@ -7,6 +7,8 @@ import {
   type KeyboardSnapshot,
   type ReadProgress,
   type TapDanceEntry,
+  type WriteOperation,
+  type WriteProgress,
 } from '../types.ts'
 import {
   getCombo,
@@ -19,6 +21,10 @@ import {
   getTapDance,
   getUnlockStatus,
   getViaProtocolVersion,
+  setCombo,
+  setEncoder,
+  setKeycode,
+  setTapDance,
   type Requester,
 } from './commands.ts'
 import { decompressDefinition, parseDefinition } from './definition.ts'
@@ -91,6 +97,62 @@ export interface HidEvents {
   removeEventListener(type: 'disconnect', listener: HidDisconnectListener): void
 }
 
+/** 本体の構成のうち、書く場所を確かめるのに使う数 */
+interface DeviceShape {
+  layerCount: number
+  rows: number
+  cols: number
+  encoderCount: number
+  tapDanceCount: number
+  comboCount: number
+}
+
+const isIndex = (value: number, count: number) => Number.isInteger(value) && value >= 0 && value < count
+// キーコードと時間の値は、2 バイトで送る
+const isU16 = (value: number) => isIndex(value, 0x10000)
+
+/** 操作が、本体にある場所を指していて、送れる値か */
+function fits(shape: DeviceShape, operation: WriteOperation): boolean {
+  switch (operation.type) {
+    case 'setKey':
+      return (
+        isIndex(operation.layer, shape.layerCount) &&
+        isIndex(operation.key, shape.rows * shape.cols) &&
+        isU16(operation.keycode)
+      )
+    case 'setEncoder':
+      return (
+        isIndex(operation.layer, shape.layerCount) &&
+        isIndex(operation.encoder, shape.encoderCount) &&
+        isU16(operation.keycode)
+      )
+    case 'setTapDance': {
+      const { onTap, onHold, onDoubleTap, onTapHold, tappingTerm } = operation.entry
+      return isIndex(operation.index, shape.tapDanceCount) && [onTap, onHold, onDoubleTap, onTapHold, tappingTerm].every(isU16)
+    }
+    case 'setCombo':
+      return (
+        isIndex(operation.index, shape.comboCount) &&
+        operation.entry.keys.length === 4 &&
+        [...operation.entry.keys, operation.entry.output].every(isU16)
+      )
+  }
+}
+
+function send(request: Requester, shape: DeviceShape, operation: WriteOperation): Promise<void> {
+  switch (operation.type) {
+    case 'setKey':
+      // キーの番号は、行 × 列数 + 列
+      return setKeycode(request, operation.layer, Math.floor(operation.key / shape.cols), operation.key % shape.cols, operation.keycode)
+    case 'setEncoder':
+      return setEncoder(request, operation.layer, operation.encoder, operation.direction === 'left' ? 0 : 1, operation.keycode)
+    case 'setTapDance':
+      return setTapDance(request, operation.index, operation.entry)
+    case 'setCombo':
+      return setCombo(request, operation.index, operation.entry)
+  }
+}
+
 export class VialDevice implements KeyboardDevice {
   readonly name: string
   readonly protocol: string
@@ -102,6 +164,8 @@ export class VialDevice implements KeyboardDevice {
   private closed = false
   // こちらから切断したのではなく、機器がなくなった
   private lost = false
+  // 最後に読み終えた本体の構成。書く場所が本体にあるかを確かめるのと、キーの番号を行と列に直すのに使う
+  private shape: DeviceShape | null = null
 
   constructor(
     device: RawHidDevice,
@@ -246,6 +310,14 @@ export class VialDevice implements KeyboardDevice {
         return null
       }
 
+      this.shape = {
+        layerCount,
+        rows: layout.rows,
+        cols: layout.cols,
+        encoderCount: layout.encoderCount,
+        tapDanceCount: counts.tapDance,
+        comboCount: counts.combo,
+      }
       return {
         uid,
         layout,
@@ -269,9 +341,30 @@ export class VialDevice implements KeyboardDevice {
     }
   }
 
-  // 書き込みは #15 で作る。それまでは、呼ばれたら必ず失敗する（画面からは、まだ呼ばれない）
-  async write(): Promise<void> {
-    throw new Error('Vial の機器への書き込みは、まだ実装していない')
+  /**
+   * 渡された順に、1つずつ書く。書く前に、すべての操作が本体にある場所を指していることを確かめる
+   * （本体にない場所を指す操作は、呼び出し側の誤りとして RangeError にし、何も書かない）。
+   *
+   * 書くコマンドの応答の形は、実機で確かめていない。応答の中身では成否を決めず、通信の失敗（タイムアウト、送信の失敗、切断、
+   * 同期のやり直しの失敗）だけを失敗にする。書けたかどうかは、呼び出し側（session/writeSession.ts）が読み直して確かめる。
+   * 応答が遅れて送り直した時は、同じ内容をもう一度書くことになるが、結果は変わらない
+   */
+  async write(operations: WriteOperation[], onProgress?: (progress: WriteProgress) => void): Promise<void> {
+    const { shape } = this
+    if (!shape) throw new Error('書き込む前に、read で本体の構成を読んでおく')
+    for (const operation of operations) {
+      if (!fits(shape, operation)) throw new RangeError(`本体にない場所への書き込み: ${JSON.stringify(operation)}`)
+    }
+    const request: Requester = (payload) => this.transport.request(payload)
+    for (const [index, operation] of operations.entries()) {
+      try {
+        await send(request, shape, operation)
+      } catch (error) {
+        if (error instanceof DeviceError) throw new DeviceError(error.kind, { operation: index, cause: error })
+        throw error
+      }
+      onProgress?.({ done: index + 1, total: operations.length })
+    }
   }
 
   async disconnect(): Promise<void> {

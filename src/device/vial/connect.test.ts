@@ -1,85 +1,16 @@
 import { expect, test } from 'vitest'
 import { DeviceError } from '../types.ts'
 import { findReportId, openVialDevice } from './connect.ts'
-import { REPORT_SIZE, type HidDeviceLike } from './transport.ts'
+import { REPORT_SIZE } from './transport.ts'
 import { sampleState } from './testing/sampleState.ts'
 import { definitionJson } from './testing/definitionFixture.ts'
 import { respond } from './testing/simulatedKeyboard.ts'
-import { ExchangeLog, type HidEvents, type RawHidDevice } from './vialDevice.ts'
+import { ExchangeLog } from './vialDevice.ts'
+import { collection, FakeHid, FakeHidDevice } from './testing/fakeHid.ts'
 // 実機（Cornix LP、ファームウェア V1.12）から 2026-10-12 に取った記録。UID だけ、にせの値に置き換えてある
 import cornixBluetooth from '../fixtures/cornix/bluetooth.json'
 import cornixUsb from '../fixtures/cornix/usb.json'
 import cornixVil from '../fixtures/cornix/cornix.vil?raw'
-
-const collection = (usagePage: number, usage: number, reportId?: number): HIDCollectionInfo => ({
-  usagePage,
-  usage,
-  outputReports: reportId === undefined ? [] : [{ reportId }],
-})
-
-type InputListener = (event: { data: DataView }) => void
-
-/** 要求を受けるたびに、決めた応答を返す偽の HID 機器 */
-class FakeHidDevice implements RawHidDevice, HidDeviceLike {
-  opened = false
-  productName = 'Cornix'
-  collections = [collection(0xff60, 0x61)]
-  private listeners = new Set<InputListener>()
-  protected readonly reply: (request: Uint8Array) => Uint8Array
-
-  constructor(reply: number[] | ((request: Uint8Array) => Uint8Array)) {
-    this.reply =
-      typeof reply === 'function'
-        ? reply
-        : () => {
-            const report = new Uint8Array(REPORT_SIZE)
-            report.set(reply)
-            return report
-          }
-  }
-
-  async open(): Promise<void> {
-    this.opened = true
-  }
-
-  async close(): Promise<void> {
-    this.opened = false
-  }
-
-  async sendReport(_reportId: number, data: Uint8Array<ArrayBuffer>): Promise<void> {
-    const report = this.reply(data)
-    queueMicrotask(() => this.deliver(report))
-  }
-
-  protected deliver(report: Uint8Array): void {
-    for (const listener of this.listeners) listener({ data: new DataView(report.buffer) })
-  }
-
-  addEventListener(_type: 'inputreport', listener: InputListener): void {
-    this.listeners.add(listener)
-  }
-
-  removeEventListener(_type: 'inputreport', listener: InputListener): void {
-    this.listeners.delete(listener)
-  }
-}
-
-/** 切断のイベントを、テストから起こせる偽の navigator.hid */
-class FakeHid implements HidEvents {
-  private listeners = new Set<(event: { device: unknown }) => void>()
-
-  addEventListener(_type: 'disconnect', listener: (event: { device: unknown }) => void): void {
-    this.listeners.add(listener)
-  }
-
-  removeEventListener(_type: 'disconnect', listener: (event: { device: unknown }) => void): void {
-    this.listeners.delete(listener)
-  }
-
-  disconnect(device: unknown): void {
-    for (const listener of [...this.listeners]) listener({ device })
-  }
-}
 
 test('Raw HID の出力レポートの ID を返す', () => {
   const device = { collections: [collection(0x01, 0x06, 1), collection(0xff60, 0x61, 4)] }

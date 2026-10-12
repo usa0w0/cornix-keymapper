@@ -10,6 +10,7 @@ import { DeviceError } from '../types.ts'
 export type Requester = (payload: number[], echo?: number) => Promise<Uint8Array>
 
 const VIA_GET_PROTOCOL_VERSION = 0x01
+const VIA_SET_KEYCODE = 0x05
 const VIA_GET_LAYER_COUNT = 0x11
 const VIA_GET_KEYMAP_BUFFER = 0x12
 const VIAL_PREFIX = 0xfe
@@ -17,11 +18,14 @@ const VIAL_GET_KEYBOARD_ID = 0x00
 const VIAL_GET_SIZE = 0x01
 const VIAL_GET_DEFINITION = 0x02
 const VIAL_GET_ENCODER = 0x03
+const VIAL_SET_ENCODER = 0x04
 const VIAL_GET_UNLOCK_STATUS = 0x05
 const VIAL_DYNAMIC_ENTRY = 0x0d
 const DYNAMIC_GET_COUNTS = 0x00
 const DYNAMIC_TAP_DANCE_GET = 0x01
+const DYNAMIC_TAP_DANCE_SET = 0x02
 const DYNAMIC_COMBO_GET = 0x03
+const DYNAMIC_COMBO_SET = 0x04
 
 // 応答の先頭が、要求と同じ内容になるバイト数。実機（Cornix LP）で確かめたのは、VIA の 0x01、0x11（コマンド番号）と
 // 0x12（コマンド番号・位置・大きさ）だけ。Vial（0xFE）のコマンドは返さないので、指定しない
@@ -42,6 +46,8 @@ const u16be = (bytes: Uint8Array, at: number) => (bytes[at] << 8) | bytes[at + 1
 const u16le = (bytes: Uint8Array, at: number) => bytes[at] | (bytes[at + 1] << 8)
 const u32le = (bytes: Uint8Array, at: number) =>
   (bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16) | (bytes[at + 3] << 24)) >>> 0
+const be16 = (value: number) => [(value >> 8) & 0xff, value & 0xff]
+const le16 = (value: number) => [value & 0xff, (value >> 8) & 0xff]
 const le32 = (value: number) => [value & 0xff, (value >> 8) & 0xff, (value >> 16) & 0xff, value >>> 24]
 
 export async function getViaProtocolVersion(request: Requester): Promise<number> {
@@ -166,4 +172,44 @@ export interface UnlockStatus {
 export async function getUnlockStatus(request: Requester): Promise<UnlockStatus> {
   const response = await request([VIAL_PREFIX, VIAL_GET_UNLOCK_STATUS])
   return { unlocked: response[0] !== 0, inProgress: response[1] !== 0 }
+}
+
+// ---- 書くコマンド ----
+// バイトの並びは、読むコマンド（実機で確かめ済み）と対になる形で、QMK 版 Vial のとおりにしてある。
+// 応答の形は、実機（Cornix LP、RMK）で確かめていない（docs/design.md「実機で確かめること」の 19）。
+// そのため、応答の中身は見ず、突き合わせ（echo）にも使わない。書けたかどうかは、呼び出し側が読み直して確かめる
+
+/** キー1つを書く。位置は、行列の行と列。キーコードは上位バイト先（キーマップのまとめ読みと同じ） */
+export async function setKeycode(request: Requester, layer: number, row: number, col: number, keycode: number): Promise<void> {
+  await request([VIA_SET_KEYCODE, layer, row, col, ...be16(keycode)])
+}
+
+/** エンコーダーの1方向を書く。direction は、読むコマンドの応答の並びと同じで、0 が左回し、1 が右回し */
+export async function setEncoder(
+  request: Requester,
+  layer: number,
+  index: number,
+  direction: 0 | 1,
+  keycode: number,
+): Promise<void> {
+  await request([VIAL_PREFIX, VIAL_SET_ENCODER, layer, index, direction, ...be16(keycode)])
+}
+
+/** 枠1つぶんを書く。中身は、読むコマンドの応答（結果の 1 バイトの後ろ）と同じ 10 バイト */
+async function setDynamicEntry(request: Requester, kind: number, index: number, values: number[]): Promise<void> {
+  await request([VIAL_PREFIX, VIAL_DYNAMIC_ENTRY, kind, index, ...values.flatMap(le16)])
+}
+
+export function setTapDance(
+  request: Requester,
+  index: number,
+  entry: { onTap: number; onHold: number; onDoubleTap: number; onTapHold: number; tappingTerm: number },
+): Promise<void> {
+  const { onTap, onHold, onDoubleTap, onTapHold, tappingTerm } = entry
+  return setDynamicEntry(request, DYNAMIC_TAP_DANCE_SET, index, [onTap, onHold, onDoubleTap, onTapHold, tappingTerm])
+}
+
+export function setCombo(request: Requester, index: number, entry: { keys: readonly number[]; output: number }): Promise<void> {
+  const [a = 0, b = 0, c = 0, d = 0] = entry.keys
+  return setDynamicEntry(request, DYNAMIC_COMBO_SET, index, [a, b, c, d, entry.output])
 }
