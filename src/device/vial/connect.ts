@@ -1,6 +1,6 @@
 // WebHID での機器選択と接続。USB と Bluetooth で同じ指定を使う
 import { DeviceError, type DeviceConnector } from '../types.ts'
-import { Transport, type HidDeviceLike } from './transport.ts'
+import { Transport, type HidDeviceLike, type TransportOptions } from './transport.ts'
 import { ExchangeLog, VialDevice, type HidEvents, type RawHidDevice } from './vialDevice.ts'
 
 // VIA / Vial の Raw HID インターフェース
@@ -22,15 +22,22 @@ export function findReportId(device: Collections): number {
   return findRawHidCollection(device)?.outputReports?.[0]?.reportId ?? 0
 }
 
-/** 機器を開き、VIA の応答が返ることを確かめる */
+/** 機器を開き、VIA の応答が返ることを確かめる。timing は、テストで待ち時間を短くするためのもの */
 export async function openVialDevice(
   device: RawHidDevice & HidDeviceLike,
   hid: HidEvents,
+  timing: Pick<TransportOptions, 'timeoutMs' | 'settleMs'> = {},
 ): Promise<VialDevice> {
   if (!device.opened) await device.open()
   const log = new ExchangeLog()
-  const transport = new Transport(device, { reportId: findReportId(device), onExchange: log.record })
+  const transport = new Transport(device, {
+    ...timing,
+    reportId: findReportId(device),
+    onExchange: log.record,
+    onStray: log.recordStray,
+  })
   try {
+    // ここでは応答を突き合わせない（合わない応答を捨てて待つと、VIA でない機器をタイムアウトまで待つことになる）
     const response = await transport.request([VIA_GET_PROTOCOL_VERSION])
     // 応答の先頭は要求と同じコマンド番号。違えば、別の要求への応答か、VIA でない機器
     if (response[0] !== VIA_GET_PROTOCOL_VERSION) throw new DeviceError('unexpected-response')

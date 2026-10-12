@@ -3,8 +3,11 @@
 
 import { DeviceError } from '../types.ts'
 
-/** 要求を送り、応答（32 バイト）を返すもの。Transport.request を渡す */
-export type Requester = (payload: number[]) => Promise<Uint8Array>
+/**
+ * 要求を送り、応答（32 バイト）を返すもの。Transport.request を渡す。
+ * echo は、応答の先頭が要求と同じ内容になるバイト数（Transport が、合わない応答を捨てる）
+ */
+export type Requester = (payload: number[], echo?: number) => Promise<Uint8Array>
 
 const VIA_GET_PROTOCOL_VERSION = 0x01
 const VIA_GET_LAYER_COUNT = 0x11
@@ -19,6 +22,11 @@ const VIAL_DYNAMIC_ENTRY = 0x0d
 const DYNAMIC_GET_COUNTS = 0x00
 const DYNAMIC_TAP_DANCE_GET = 0x01
 const DYNAMIC_COMBO_GET = 0x03
+
+// 応答の先頭が、要求と同じ内容になるバイト数。実機（Cornix LP）で確かめたのは、VIA の 0x01、0x11（コマンド番号）と
+// 0x12（コマンド番号・位置・大きさ）だけ。Vial（0xFE）のコマンドは返さないので、指定しない
+const ECHO_COMMAND = 1
+const ECHO_KEYMAP_BUFFER = 4
 
 /** キーマップのまとめ読みで、1回に読めるバイト数（32 バイトの応答から先頭 4 バイトを引いた数） */
 const KEYMAP_CHUNK = 28
@@ -37,7 +45,7 @@ const u32le = (bytes: Uint8Array, at: number) =>
 const le32 = (value: number) => [value & 0xff, (value >> 8) & 0xff, (value >> 16) & 0xff, value >>> 24]
 
 export async function getViaProtocolVersion(request: Requester): Promise<number> {
-  return u16be(await request([VIA_GET_PROTOCOL_VERSION]), 1)
+  return u16be(await request([VIA_GET_PROTOCOL_VERSION], ECHO_COMMAND), 1)
 }
 
 export interface KeyboardId {
@@ -72,7 +80,7 @@ export async function getCompressedDefinition(
 }
 
 export async function getLayerCount(request: Requester): Promise<number> {
-  const count = (await request([VIA_GET_LAYER_COUNT]))[1]
+  const count = (await request([VIA_GET_LAYER_COUNT], ECHO_COMMAND))[1]
   if (count === 0 || count > MAX_LAYER_COUNT) throw new DeviceError('unexpected-response')
   return count
 }
@@ -94,7 +102,7 @@ export async function getKeymap(
   const buffer = new Uint8Array(size)
   for (let offset = 0; offset < size; offset += KEYMAP_CHUNK) {
     const length = Math.min(KEYMAP_CHUNK, size - offset)
-    const response = await request([VIA_GET_KEYMAP_BUFFER, offset >> 8, offset & 0xff, length])
+    const response = await request([VIA_GET_KEYMAP_BUFFER, offset >> 8, offset & 0xff, length], ECHO_KEYMAP_BUFFER)
     buffer.set(response.slice(4, 4 + length), offset)
     onChunk?.(Math.min(offset + length, size), size)
   }

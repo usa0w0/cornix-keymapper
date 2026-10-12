@@ -31,13 +31,14 @@ class FakeHidDevice implements HidDeviceLike {
 }
 
 const TIMEOUT = 1000
+const SETTLE = 200
 let device: FakeHidDevice
 let transport: Transport
 
 beforeEach(() => {
   vi.useFakeTimers()
   device = new FakeHidDevice()
-  transport = new Transport(device, { timeoutMs: TIMEOUT })
+  transport = new Transport(device, { timeoutMs: TIMEOUT, settleMs: SETTLE })
 })
 
 afterEach(() => {
@@ -90,53 +91,183 @@ test('要求は1つずつ順に送り、前の応答が来るまで次を送ら�
   expect((await second)[0]).toBe(0xa2)
 })
 
-test('応答がなければ1回だけ送り直し、その応答を返す', async () => {
-  const result = transport.request([0x01])
+const sentCommands = () => device.sent.map((s) => s.data[0])
+
+test('応答がなければ、同期をやり直してから1回だけ送り直し、その応答を返す', async () => {
+  const result = transport.request([0xfe, 0x00])
   await vi.advanceTimersByTimeAsync(TIMEOUT)
-  expect(device.sent).toHaveLength(2)
+  // 同期のやり直しの VIA 0x01 を先に送る
+  expect(sentCommands()).toEqual([0xfe, 0x01])
 
   device.respond(0x01, 0x00, 0x09)
-  expect((await result)[2]).toBe(0x09)
+  await flush()
+  // 0x01 の応答の後、ほかの応答が届かないことを確かめる間は、送り直さない
+  expect(sentCommands()).toEqual([0xfe, 0x01])
+  await vi.advanceTimersByTimeAsync(SETTLE)
+  expect(sentCommands()).toEqual([0xfe, 0x01, 0xfe])
+
+  device.respond(0x06, 0x00, 0x09)
+  expect((await result)[0]).toBe(0x06)
+  expect(transport.timeoutCount).toBe(1)
 })
 
-test('送り直しても応答がなければ timeout で失敗する', async () => {
-  const result = transport.request([0x01])
+test('同期をやり直しても応答がなければ timeout で失敗する', async () => {
+  const result = transport.request([0x11])
   const assertion = expect(result).rejects.toMatchObject({ name: 'DeviceError', kind: 'timeout' })
   await vi.advanceTimersByTimeAsync(TIMEOUT * 2)
   await assertion
-  expect(device.sent).toHaveLength(2)
+  expect(sentCommands()).toEqual([0x11, 0x01])
 })
 
-test('失敗した要求のあとも、次の要求を処理できる', async () => {
-  const failed = transport.request([0x01])
+test('同期をやり直した後に送り直しても応答がなければ timeout で失敗する', async () => {
+  const result = transport.request([0x11])
+  const assertion = expect(result).rejects.toMatchObject({ name: 'DeviceError', kind: 'timeout' })
+  await vi.advanceTimersByTimeAsync(TIMEOUT)
+  device.respond(0x01)
+  await vi.advanceTimersByTimeAsync(SETTLE + TIMEOUT)
+  await assertion
+  expect(sentCommands()).toEqual([0x11, 0x01, 0x11])
+})
+
+test('応答が待ち時間を超えて遅れて届いても、次の要求の応答と取り違えない', async () => {
+  // Vial のコマンドの応答は、要求と突き合わせられない
+  const result = transport.request([0xfe, 0x03])
+  await vi.advanceTimersByTimeAsync(TIMEOUT)
+  expect(sentCommands()).toEqual([0xfe, 0x01])
+
+  // 遅れていた応答が、同期のやり直しの間に届く。先頭が 0x01 でないので捨てる
+  device.respond(0xa1)
+  await vi.advanceTimersByTimeAsync(SETTLE)
+  expect(sentCommands()).toEqual([0xfe, 0x01])
+
+  device.respond(0x01, 0x00, 0x09)
+  await vi.advanceTimersByTimeAsync(SETTLE)
+  expect(sentCommands()).toEqual([0xfe, 0x01, 0xfe])
+  device.respond(0xa2)
+  expect((await result)[0]).toBe(0xa2)
+
+  const next = transport.request([0xfe, 0x05])
+  await flush()
+  device.respond(0xa3)
+  expect((await next)[0]).toBe(0xa3)
+})
+
+test('遅れて届いた応答の先頭が 0x01 でも、同期のやり直しの応答と取り違えない', async () => {
+  const result = transport.request([0xfe, 0x05])
+  await vi.advanceTimersByTimeAsync(TIMEOUT)
+
+  // 遅れていた Vial の応答が、たまたま 0x01 で始まる。続けて、同期のやり直しへの応答が届く
+  device.respond(0x01, 0x00)
+  await vi.advanceTimersByTimeAsync(SETTLE - 1)
+  device.respond(0x01, 0x00, 0x09)
+  await vi.advanceTimersByTimeAsync(SETTLE - 1)
+  // 最後の応答から、まだ待ち切っていない
+  expect(sentCommands()).toEqual([0xfe, 0x01])
+  await vi.advanceTimersByTimeAsync(1)
+  expect(sentCommands()).toEqual([0xfe, 0x01, 0xfe])
+
+  device.respond(0x00, 0x00)
+  expect(Array.from((await result).slice(0, 2))).toEqual([0x00, 0x00])
+})
+
+test('タイムアウトの後、同期をやり直してから次の要求を送る', async () => {
+  const failed = transport.request([0x11])
   const assertion = expect(failed).rejects.toBeInstanceOf(DeviceError)
   await vi.advanceTimersByTimeAsync(TIMEOUT * 2)
   await assertion
+  device.sent = []
 
-  const next = transport.request([0x02])
-  // 遅れて届きうる応答を待つ時間が過ぎてから送られる
-  await vi.advanceTimersByTimeAsync(TIMEOUT)
-  expect(device.sent.at(-1)?.data[0]).toBe(0x02)
+  const next = transport.request([0x12])
+  await flush()
+  // 次の要求より前に VIA 0x01 を送り、その応答が返るまで、次の要求は送らない
+  expect(sentCommands()).toEqual([0x01])
+  // 失敗した要求への応答が、いまごろ届く
+  device.respond(0x11, 0x04)
+  await vi.advanceTimersByTimeAsync(SETTLE)
+  expect(sentCommands()).toEqual([0x01])
+
+  device.respond(0x01, 0x00, 0x09)
+  await vi.advanceTimersByTimeAsync(SETTLE)
+  expect(sentCommands()).toEqual([0x01, 0x12])
   device.respond(0xb2)
   expect((await next)[0]).toBe(0xb2)
 })
 
-test('送り直しのあと遅れて届いた応答を、次の要求の応答と取り違えない', async () => {
-  const first = transport.request([0x11])
-  await vi.advanceTimersByTimeAsync(TIMEOUT)
-  device.respond(0xa1) // 1回目か2回目のどちらかへの応答
-  expect((await first)[0]).toBe(0xa1)
-
-  const second = transport.request([0x12])
+test('要求と同じ内容を返すコマンドは、先頭が合わない応答を捨てて、合う応答を待つ', async () => {
+  const result = transport.request([0x12, 0x00, 0x1c, 0x1c], 4)
   await flush()
-  // もう1つの応答が届くまで、次の要求は送らない
-  expect(device.sent.map((s) => s.data[0])).toEqual([0x11, 0x11])
+  // コマンド番号は同じでも、位置が違う（前の要求への応答）
+  device.respond(0x12, 0x00, 0x00, 0x1c, 0xaa)
+  device.respond(0x12, 0x00, 0x1c, 0x1c, 0xbb)
+  expect((await result)[4]).toBe(0xbb)
+  expect(transport.strayCount).toBe(1)
+  expect(transport.timeoutCount).toBe(0)
+})
 
+test('待っている要求がない時に応答が届いたら数え、次の要求の前に同期をやり直す', async () => {
+  const strays: number[] = []
+  transport = new Transport(device, { timeoutMs: TIMEOUT, settleMs: SETTLE, onStray: (r) => strays.push(r[0]) })
   device.respond(0xa1)
+  expect(transport.strayCount).toBe(1)
+  expect(strays).toEqual([0xa1])
+
+  const result = transport.request([0xfe, 0x00])
   await flush()
-  expect(device.sent.map((s) => s.data[0])).toEqual([0x11, 0x11, 0x12])
-  device.respond(0xa2)
-  expect((await second)[0]).toBe(0xa2)
+  expect(sentCommands()).toEqual([0x01])
+  device.respond(0x01)
+  await vi.advanceTimersByTimeAsync(SETTLE)
+  device.respond(0x06)
+  expect((await result)[0]).toBe(0x06)
+  // 同期のやり直しは、数に入れない
+  expect(transport.strayCount).toBe(1)
+})
+
+test('同期のやり直しは、0x01 でない応答が届き続けたら unexpected-response で失敗する', async () => {
+  device.respond(0xa1)
+  const result = transport.request([0xfe, 0x00])
+  const assertion = expect(result).rejects.toMatchObject({ kind: 'unexpected-response' })
+  for (let elapsed = 0; elapsed < TIMEOUT; elapsed += 100) {
+    await vi.advanceTimersByTimeAsync(100)
+    device.respond(0xa1)
+  }
+  await assertion
+  expect(sentCommands()).toEqual([0x01])
+})
+
+test('同期のやり直しは、0x01 の応答が届き続けても、待ち時間のうちに終わる', async () => {
+  device.respond(0xa1)
+  const result = transport.request([0xfe, 0x00])
+  const assertion = expect(result).rejects.toMatchObject({ kind: 'unexpected-response' })
+  // ほかのタブが VIA 0x01 を送り続けている時など
+  for (let elapsed = 0; elapsed < TIMEOUT + SETTLE; elapsed += SETTLE / 2) {
+    await vi.advanceTimersByTimeAsync(SETTLE / 2)
+    device.respond(0x01)
+  }
+  await assertion
+  expect(sentCommands()).toEqual([0x01])
+})
+
+test('同期のやり直しに失敗した後の要求は、もう一度同期をやり直す', async () => {
+  const failed = transport.request([0x11])
+  const assertion = expect(failed).rejects.toBeInstanceOf(DeviceError)
+  await vi.advanceTimersByTimeAsync(TIMEOUT * 2)
+  await assertion
+
+  const again = transport.request([0x11], 1)
+  const againAssertion = expect(again).rejects.toMatchObject({ kind: 'timeout' })
+  await vi.advanceTimersByTimeAsync(TIMEOUT)
+  await againAssertion
+  expect(sentCommands()).toEqual([0x11, 0x01, 0x01])
+})
+
+test('同期のやり直しの間に close すると、disconnected で失敗する', async () => {
+  const result = transport.request([0x11])
+  const assertion = expect(result).rejects.toMatchObject({ kind: 'disconnected' })
+  await vi.advanceTimersByTimeAsync(TIMEOUT)
+  expect(sentCommands()).toEqual([0x11, 0x01])
+  transport.close()
+  await assertion
+  expect(vi.getTimerCount()).toBe(0)
 })
 
 test('送信に失敗したら send-failed で失敗し、原因を保持する', async () => {
