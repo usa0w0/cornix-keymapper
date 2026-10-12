@@ -111,6 +111,7 @@ interface DeviceConnector {
 
 interface KeyboardDevice {
   name: string                                           // 画面に出す機器名
+  protocol: string                                       // 画面に出す通信方式（例: VIA プロトコル 9）
   onDisconnect(listener: () => void): () => void         // 切断の通知
   read(onProgress): Promise<KeyboardSnapshot>
   write(operations: WriteOperation[], onProgress): Promise<void>   // 渡された順に書く
@@ -197,7 +198,7 @@ interface KeyBehavior {
 
 | 状態 | 置き場 | いつ作るか | いつ捨てるか |
 | --- | --- | --- | --- |
-| 接続（接続中の機器、接続の状態、切断の知らせ） | 画面の最上位（Context） | 接続した時 | 切断した時 |
+| 接続（接続中の機器、接続の状態、切断の知らせ） | 画面の最上位（`App` が `useConnection` で持つ） | 接続した時 | 切断した時 |
 | 基準（本体から読んだスナップショット） | 編集中の状態（`session/editState.ts`、`useReducer`） | 読み出しが終わった時 | 読み直した時、別の機器（UID が違う）をつないだ時 |
 | 出発点（編集の土台にするスナップショット） | 同上 | 基準と同じものを入れる。`.vil` やバックアップを読み込んだ時は、その内容に入れ替える | 基準と同じ |
 | 編集（利用者が変えたキー、エンコーダー、コンボ） | 同上 | 利用者が編集した時 | 書き込みと照合が通った時、取り消した時 |
@@ -376,10 +377,7 @@ Vial のコンボは、キーの位置ではなくキーコードの組（最大
 
 設計どおりになっていない箇所。直したら、この節から消す。
 
-- `src/ui/useConnection.ts` が `device/vial` と WebHID の切断イベントを直接使っている（`device/types.ts` がまだないため）
 - `src/device/vial/transport.ts` に、応答の突き合わせと、タイムアウト後の同期のやり直しがない
-- `src/device/vial/connect.ts` が、接続の確認で応答の先頭を確かめていない
-- `vite.config.ts` のテストの対象に `.test.tsx` が入っていない
 
 ## 実機で確かめること
 

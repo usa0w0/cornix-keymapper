@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { REPORT_SIZE, Transport, TransportError, type HidDeviceLike } from './transport.ts'
+import { DeviceError } from '../types.ts'
+import { REPORT_SIZE, Transport, type HidDeviceLike } from './transport.ts'
 
 type Listener = (event: { data: DataView }) => void
 
@@ -100,7 +101,7 @@ test('応答がなければ1回だけ送り直し、その応答を返す', asyn
 
 test('送り直しても応答がなければ timeout で失敗する', async () => {
   const result = transport.request([0x01])
-  const assertion = expect(result).rejects.toMatchObject({ name: 'TransportError', kind: 'timeout' })
+  const assertion = expect(result).rejects.toMatchObject({ name: 'DeviceError', kind: 'timeout' })
   await vi.advanceTimersByTimeAsync(TIMEOUT * 2)
   await assertion
   expect(device.sent).toHaveLength(2)
@@ -108,7 +109,7 @@ test('送り直しても応答がなければ timeout で失敗する', async ()
 
 test('失敗した要求のあとも、次の要求を処理できる', async () => {
   const failed = transport.request([0x01])
-  const assertion = expect(failed).rejects.toBeInstanceOf(TransportError)
+  const assertion = expect(failed).rejects.toBeInstanceOf(DeviceError)
   await vi.advanceTimersByTimeAsync(TIMEOUT * 2)
   await assertion
 
@@ -141,8 +142,8 @@ test('送り直しのあと遅れて届いた応答を、次の要求の応答�
 test('送信に失敗したら send-failed で失敗し、原因を保持する', async () => {
   device.failSend = true
   const error = await transport.request([0x01]).catch((e: unknown) => e)
-  expect(error).toMatchObject({ name: 'TransportError', kind: 'send-failed' })
-  expect((error as TransportError).cause).toBeInstanceOf(Error)
+  expect(error).toMatchObject({ name: 'DeviceError', kind: 'send-failed' })
+  expect((error as DeviceError).cause).toBeInstanceOf(Error)
 })
 
 test('close すると、待っている要求と以後の要求が disconnected で失敗する', async () => {

@@ -1,59 +1,47 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { connect, disconnect, requestDevice, type Connection } from '../device/vial/connect.ts'
-import { TransportError } from '../device/vial/transport.ts'
+import { useCallback, useEffect, useState } from 'react'
+import { DeviceError, type DeviceConnector, type KeyboardDevice } from '../device/types.ts'
 
 export type ConnectionState =
   | { status: 'disconnected'; notice?: string }
   | { status: 'connecting' }
-  | { status: 'connected'; connection: Connection }
+  | { status: 'connected'; device: KeyboardDevice }
 
-export function useConnection() {
+export function useConnection(connector: DeviceConnector) {
   const [state, setState] = useState<ConnectionState>({ status: 'disconnected' })
-  const current = useRef<Connection | null>(null)
+  const device = state.status === 'connected' ? state.device : null
 
   const open = useCallback(async () => {
+    setState({ status: 'connecting' })
     try {
-      const device = await requestDevice()
-      if (!device) return
-      setState({ status: 'connecting' })
-      const connection = await connect(device)
-      current.current = connection
-      setState({ status: 'connected', connection })
+      const connected = await connector.connect()
+      setState(connected ? { status: 'connected', device: connected } : { status: 'disconnected' })
     } catch (error) {
       setState({ status: 'disconnected', notice: describeError(error) })
     }
-  }, [])
+  }, [connector])
 
   const close = useCallback(async () => {
-    const connection = current.current
-    if (!connection) return
-    current.current = null
+    if (!device) return
     setState({ status: 'disconnected' })
-    await disconnect(connection).catch(() => {})
-  }, [])
+    await device.disconnect().catch(() => {})
+  }, [device])
 
   // ケーブルを抜く、Bluetooth が切れる、などで機器がなくなった時
   useEffect(() => {
-    if (!('hid' in navigator)) return
-    const onDisconnect = (event: HIDConnectionEvent) => {
-      const connection = current.current
-      if (connection?.device !== event.device) return
-      current.current = null
-      connection.transport.close()
+    if (!device) return
+    return device.onDisconnect(() => {
       setState({
         status: 'disconnected',
         notice: 'キーボードとの接続が切れました。つなぎ直してから「接続」を押してください。',
       })
-    }
-    navigator.hid.addEventListener('disconnect', onDisconnect)
-    return () => navigator.hid.removeEventListener('disconnect', onDisconnect)
-  }, [])
+    })
+  }, [device])
 
   return { state, open, close }
 }
 
-function describeError(error: unknown): string {
-  if (error instanceof TransportError) {
+export function describeError(error: unknown): string {
+  if (error instanceof DeviceError) {
     switch (error.kind) {
       case 'timeout':
         return 'キーボードから応答がありません。電源と接続を確かめて、もう一度「接続」を押してください。'
@@ -61,6 +49,8 @@ function describeError(error: unknown): string {
         return 'キーボードへ送信できませんでした。つなぎ直してから、もう一度「接続」を押してください。'
       case 'disconnected':
         return 'キーボードとの接続が切れました。つなぎ直してから「接続」を押してください。'
+      case 'unexpected-response':
+        return 'キーボードから想定と違う応答が返りました。Vial など他のアプリやタブで開いている場合は閉じて、もう一度「接続」を押してください。'
     }
   }
   const detail = error instanceof Error ? error.message : String(error)
