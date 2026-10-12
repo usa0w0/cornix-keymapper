@@ -161,7 +161,7 @@ type DeviceErrorKind = 'timeout' | 'send-failed' | 'disconnected' | 'unexpected-
 | Combo | Vial `0xFE 0x0D 0x03`（読み）、`0x04`（書き） |
 | ロックの状態（読むだけ。書き込みにロック解除が要るかを見る） | Vial `0xFE 0x05` |
 
-- レイアウト定義は XZ 圧縮されている。ブラウザーに XZ の展開機能はないため、展開だけを行う小さなライブラリ `xz-decompress` を入れた（WebAssembly を含み、ビルド後の大きさが約 30 kB 増える）。実機の定義（圧縮後 752 バイト）を展開できた
+- レイアウト定義は XZ 圧縮されている。ブラウザーに XZ の展開機能はないため、展開だけを行う小さなライブラリ `xz-decompress` を入れた（WebAssembly を含み、ビルド後の大きさが約 30 kB 増える）。実機の定義（圧縮後 752 バイト）を展開できた。本体から来る値なので、圧縮後は 64 KiB、展開後は 1 MiB を上限にし、超えたら読み出しを失敗にする
 - 定義の `layouts.keymap`（KLE 形式）から、キーの座標・行列上の位置・エンコーダーを取り出して描画する。配列はコードに持たない
 - マクロ、Key Override、QMK Settings のコマンドは使わない
 

@@ -186,8 +186,9 @@ export class VialDevice implements KeyboardDevice {
         return result
       })
 
-      // 診断用。書き込みにロック解除が要るかを、通信の記録から読み取れるようにする。結果は使わない
-      await during('ロックの状態', () => getUnlockStatus(request).catch(() => null))
+      // 診断用。書き込みにロック解除が要るかを、通信の記録から読み取れるようにする。結果は使わない。
+      // 通信の失敗（タイムアウトや切断）は、ほかの読み出しと同じく失敗にする
+      await during('ロックの状態', () => getUnlockStatus(request))
 
       return {
         uid,

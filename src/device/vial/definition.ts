@@ -2,9 +2,28 @@
 import { XzReadableStream } from 'xz-decompress'
 import type { LayoutDefinition } from '../types.ts'
 
-export async function decompressDefinition(compressed: Uint8Array<ArrayBuffer>): Promise<unknown> {
-  const stream = new XzReadableStream(new Blob([compressed]).stream())
-  return JSON.parse(await new Response(stream).text())
+/** 展開後の定義の上限。実機（Cornix）の定義は数 kB */
+const MAX_DEFINITION_TEXT_SIZE = 1024 * 1024
+
+/** 展開後が maxSize バイトを超えたら、読むのをやめて失敗する（小さな圧縮データが巨大に展開されうるため） */
+export async function decompressDefinition(
+  compressed: Uint8Array<ArrayBuffer>,
+  maxSize = MAX_DEFINITION_TEXT_SIZE,
+): Promise<unknown> {
+  const reader = new XzReadableStream(new Blob([compressed]).stream()).getReader()
+  const chunks: Uint8Array<ArrayBuffer>[] = []
+  let size = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    size += value.length
+    if (size > maxSize) {
+      await reader.cancel()
+      throw new Error(`展開した定義が大きすぎる（${maxSize} バイトまで）`)
+    }
+    chunks.push(new Uint8Array(value))
+  }
+  return JSON.parse(await new Blob(chunks).text())
 }
 
 const isByteCount = (value: unknown): value is number =>

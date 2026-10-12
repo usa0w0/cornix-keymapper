@@ -161,6 +161,18 @@ test('読み出しの途中で失敗したら、どこで失敗したかを添�
   expect(error).toMatchObject({ kind: 'unexpected-response', step: 'Tap Dance' })
 })
 
+test('最後のロックの状態の読み出しで通信に失敗しても、読み出しは失敗する', async () => {
+  const state = sampleState()
+  const reply = (request: Uint8Array) => {
+    if (request[0] === 0xfe && request[1] === 0x05) throw new Error('送信できない')
+    return respond(state, request)
+  }
+  const device = await openVialDevice(new FakeHidDevice(reply), new FakeHid())
+  const error = await device.read().catch((e: unknown) => e)
+  expect(error).toBeInstanceOf(DeviceError)
+  expect(error).toMatchObject({ kind: 'send-failed', step: 'ロックの状態' })
+})
+
 test('切断の登録より前に機器がなくなっていたら、登録した時にすぐ知らせる', async () => {
   const hid = new FakeHid()
   const hidDevice = new FakeHidDevice([0x01, 0x00, 0x09])

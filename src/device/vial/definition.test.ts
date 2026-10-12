@@ -8,6 +8,12 @@ test('XZ 圧縮された定義を展開できる', async () => {
   expect(await decompressDefinition(compressed)).toEqual(definitionJson)
 })
 
+test('展開後の大きさが上限を超える定義は失敗する', async () => {
+  const compressed = new Uint8Array(sampleState().compressedDefinition)
+  const size = JSON.stringify(definitionJson).length
+  await expect(decompressDefinition(compressed, size - 1)).rejects.toThrow('大きすぎる')
+})
+
 test('定義から、行列の大きさとエンコーダーの数を取り出す', () => {
   const layout = parseDefinition(definitionJson)
   expect(layout).toMatchObject({ rows: 2, cols: 3, encoderCount: 1 })
