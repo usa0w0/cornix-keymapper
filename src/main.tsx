@@ -15,6 +15,11 @@ async function chooseConnector(): Promise<DeviceConnector> {
 
 // URL に ?design を付けると、画面デザインの試作（#22）を表示する。デザインが決まったら消す
 async function chooseScreen() {
+  // URL に ?picker を付けると、動作を選ぶ部品だけの見本を表示する。編集欄（#10）につないだら消す
+  if (new URLSearchParams(location.search).has('picker')) {
+    const { PickerPreview } = await import('./ui/PickerPreview.tsx')
+    return <PickerPreview />
+  }
   if (new URLSearchParams(location.search).has('design')) {
     const [{ Prototype }, { cornixSnapshot }] = await Promise.all([
       import('./prototype/Prototype.tsx'),
