@@ -15,7 +15,11 @@ type Selection = { kind: 'key'; index: number } | { kind: 'encoder'; encoder: nu
 
 export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
   const [tab, setTab] = useState<'keymap' | 'combo'>('keymap')
-  const [layer, setLayer] = useState(0)
+  // ?layer=1 のように、最初に開くレイヤーを URL で選べる（見比べやすくするため）
+  const [layer, setLayer] = useState(() => {
+    const requested = Number(new URLSearchParams(location.search).get('layer'))
+    return Number.isInteger(requested) && requested >= 0 && requested < snapshot.keymap.length ? requested : 0
+  })
   const [selection, setSelection] = useState<Selection | null>(null)
   const { cols } = snapshot.layout
   const usedTapDances = snapshot.tapDances.filter((t) => t.onTap || t.onHold || t.onDoubleTap || t.onTapHold).length
@@ -164,6 +168,11 @@ function KeyFace({ view, changed }: { view: KeyView; changed?: boolean }) {
       {changed && <span className="mark-changed" title="変更あり" />}
       {view.state === 'locked' && <span className="mark-locked" title="このサイトでは編集不可">🔒</span>}
       {view.state === 'transparent' && <span className="mark-transparent">透過</span>}
+      {main === 'tap' && shown.slots.tap?.shifted && (
+        <span className="face-shifted" title="Shift を押しながら打った時に出る字">
+          {shown.slots.tap.shifted}
+        </span>
+      )}
       {main && (
         <span className="face-main">
           {main !== 'tap' && <i>{SLOT_TAGS[main]}</i>}
@@ -225,13 +234,19 @@ function EditPanel(props: { snapshot: KeyboardSnapshot; layer: number; selection
           <Field
             key={slot}
             name={SLOT_NAMES[slot]}
-            value={view.slots[slot]?.full}
+            value={describe(view.slots[slot])}
             placeholder={slot === 'tap' && view.state !== 'normal' ? (view.state === 'transparent' ? '透過' : '何もしない') : undefined}
           />
         ))}
       </div>
     </section>
   )
+}
+
+/** 編集欄に出す名前。Shift で変わる字があれば添える */
+function describe(label?: { full: string; shifted?: string }): string | undefined {
+  if (!label) return undefined
+  return label.shifted ? `${label.full}（Shift を押しながらだと ${label.shifted}）` : label.full
 }
 
 function Field({ name, value, placeholder }: { name: string; value?: string; placeholder?: string }) {
@@ -257,6 +272,7 @@ function Legend() {
   const a = { short: 'A', full: 'A' }
   const samples: { name: string; view: KeyView; changed?: boolean; selected?: boolean }[] = [
     { name: 'タップだけ', view: sample({ tap: a }) },
+    { name: 'Shift で変わる字', view: sample({ tap: { short: '1', full: '1', shifted: '!' } }) },
     { name: 'タップと長押し', view: sample({ tap: a, hold: { short: 'Ctrl', full: '左 Ctrl' } }) },
     {
       name: '4つとも',

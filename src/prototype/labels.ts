@@ -9,6 +9,8 @@ export interface Label {
   note?: string
   /** 編集欄に出す名前 */
   full: string
+  /** Shift を押しながら打った時に出る字（数字と記号のキー。US 配列） */
+  shifted?: string
 }
 
 export type Slot = 'tap' | 'hold' | 'doubleTap' | 'tapHold'
@@ -52,11 +54,11 @@ function basic(code: number): Label {
   }
   if (code >= 30 && code <= 39) {
     const digit = String((code - 29) % 10)
-    return { short: digit, full: digit }
+    return { short: digit, full: digit, shifted: SHIFTED[code] }
   }
   if (code >= 58 && code <= 69) return { short: `F${code - 57}`, full: `F${code - 57}` }
   const entry = BASIC[code]
-  if (entry) return { short: entry[0], full: entry[1] ?? entry[0] }
+  if (entry) return { short: entry[0], full: entry[1] ?? entry[0], shifted: SHIFTED[code] }
   return { short: hex(code), full: `キーコード ${hex(code)}` }
 }
 
