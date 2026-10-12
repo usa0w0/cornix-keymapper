@@ -65,7 +65,7 @@ const UNSUPPORTED_RANGES: [number, number, (index: number, custom: readonly Cust
   [0x5240, 32, (n) => `DF(${n})`],
   [0x52c0, 32, (n) => `TT(${n})`],
   [0x5700, 256, (n) => `Tap Dance ${n}`],
-  [0x7700, 128, (n) => `マクロ ${n}`],
+  [0x7700, 256, (n) => `マクロ ${n}`],
   [0x7e00, 64, (n, custom) => custom[n]?.name ?? `USER${String(n).padStart(2, '0')}`],
 ]
 

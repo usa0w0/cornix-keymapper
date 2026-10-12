@@ -82,6 +82,8 @@ test('対象外の機能は、名前を付けた unsupported になる', () => {
   expect(keycodeToAction(0x52c1)).toEqual({ kind: 'unsupported', raw: 0x52c1, label: 'TT(1)' })
   expect(keycodeToAction(0x5703)).toEqual({ kind: 'unsupported', raw: 0x5703, label: 'Tap Dance 3' })
   expect(keycodeToAction(0x7702)).toEqual({ kind: 'unsupported', raw: 0x7702, label: 'マクロ 2' })
+  expect(keycodeToAction(0x77ff)).toEqual({ kind: 'unsupported', raw: 0x77ff, label: 'マクロ 255' })
+  expect(keycodeToAction(0x7800)).toEqual({ kind: 'unsupported', raw: 0x7800, label: '0x7800' })
   // 独自のキーは、レイアウト定義の名前を使う。定義になければ Vial と同じ USERnn
   expect(keycodeToAction(0x7e07, custom)).toEqual({ kind: 'unsupported', raw: 0x7e07, label: 'CLR_PEER' })
   expect(keycodeToAction(0x7e07)).toEqual({ kind: 'unsupported', raw: 0x7e07, label: 'USER07' })
