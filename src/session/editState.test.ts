@@ -499,6 +499,15 @@ test('中身はあるが使われていない枠は、利用者が認めた時�
   const reverted = revertEdit(revertEdit(more, { kind: 'key', layer: 0, key: 1 }), { kind: 'key', layer: 0, key: 2 })
   expect(reverted.edits).toEqual(EMPTY_EDITS)
   expect(hasUnwrittenChanges(reverted)).toBe(false)
+  // 読み直した内容に当て直す時は、持ち越さない（前の内容を見て出した答えなので）。枠が足りない状態になる
+  const fresh = full((s) => {
+    s.keymap[9][31] = 0
+    s.keymap[1][0] = 0x0007
+  })
+  const reapplied = reapplyEdits(allowed.state, fresh)
+  expect(reapplied.edits).toEqual({ keys: [{ layer: 0, key: 1, behavior: A_ESC }], encoders: [], combos: [] })
+  expect(planKeys(reapplied)).toMatchObject({ missing: 1, overwritable: 1 })
+  expect(replaceSource(allowed.state, fresh).edits.overwriteUnusedTapDances).toBeUndefined()
   // 画面からは、編集と一緒に送る
   const session = run([
     { type: 'read', snapshot: state.source },

@@ -99,6 +99,15 @@ function prune(source: KeyboardSnapshot, edits: Edits): Edits {
   return overwrite ? { keys, encoders, combos, overwriteUnusedTapDances: true } : { keys, encoders, combos }
 }
 
+/**
+ * 土台（出発点）が別の内容に替わる時の編集。使われていない枠を上書きしてよい、という答えは、
+ * 前の内容を見て出したものなので、持ち越さない（別の枠を、聞かずに上書きしないため）
+ */
+function carryOver(source: KeyboardSnapshot, edits: Edits): Edits {
+  const { keys, encoders, combos } = edits
+  return prune(source, { keys, encoders, combos })
+}
+
 /** 編集を入れ替える。中身が変わらなければ、同じ状態を返す（画面を描き直さない） */
 const withEdits = (state: EditState, edits: Edits): EditState => {
   const pruned = prune(state.source, edits)
@@ -213,7 +222,7 @@ export function revertEdit(state: EditState, place: EditPlace): EditState {
  */
 export function replaceSource(state: EditState, source: KeyboardSnapshot): EditState {
   const next = sameSnapshot(source, state.baseline) ? state.baseline : source
-  return { ...state, source: next, edits: prune(next, state.edits) }
+  return { ...state, source: next, edits: next === state.source ? state.edits : carryOver(next, state.edits) }
 }
 
 /** 出発点の入れ替えを取り消す（出発点を基準に戻す） */
@@ -229,7 +238,7 @@ export const markWritten = (verified: KeyboardSnapshot): EditState => loadSnapsh
  */
 export function reapplyEdits(state: EditState, fresh: KeyboardSnapshot): EditState {
   const source = isSourceReplaced(state) && !sameSnapshot(state.source, fresh) ? state.source : fresh
-  return { baseline: fresh, source, edits: prune(source, state.edits) }
+  return { baseline: fresh, source, edits: source === state.source ? prune(source, state.edits) : carryOver(source, state.edits) }
 }
 
 /**
