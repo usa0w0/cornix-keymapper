@@ -213,6 +213,11 @@ export class VialDevice implements KeyboardDevice {
     }
   }
 
+  // 書き込みは #15 で作る。それまでは、呼ばれたら必ず失敗する（画面からは、まだ呼ばれない）
+  async write(): Promise<void> {
+    throw new Error('Vial の機器への書き込みは、まだ実装していない')
+  }
+
   async disconnect(): Promise<void> {
     if (!this.release()) return
     await this.device.close()

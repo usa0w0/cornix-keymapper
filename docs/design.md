@@ -116,7 +116,7 @@ interface KeyboardDevice {
   protocol: string                                       // 画面に出す通信方式（例: VIA プロトコル 9）
   onDisconnect(listener: () => void): () => void         // 切断の通知
   read(onProgress): Promise<KeyboardSnapshot>
-  write(operations: WriteOperation[], onProgress): Promise<void>   // 渡された順に書く（Vial 版は未実装。偽の機器にはある）
+  write(operations: WriteOperation[], onProgress): Promise<void>   // 渡された順に書く
   exchangeCount(): number                                // 診断用。接続してからの通信の回数
   exchanges(since?: number): ExchangeRecord[]            // 診断用。通信の記録（since 以降の分）
   disconnect(): Promise<void>
@@ -388,6 +388,7 @@ Vial のコンボは、キーの位置ではなくキーコードの組（最大
 設計どおりになっていない箇所。直したら、この節から消す。
 
 - `src/device/vial/transport.ts` に、応答の突き合わせと、タイムアウト後の同期のやり直しがない
+- `src/device/vial/vialDevice.ts` の `write` は、呼ぶと必ず失敗する（書き込みは #15 で作る）。偽の機器の `write` は動く
 
 ## 実機で確かめること
 

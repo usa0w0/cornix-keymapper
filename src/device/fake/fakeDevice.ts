@@ -105,7 +105,6 @@ export class FakeDevice implements KeyboardDevice {
     return snapshot
   }
 
-  /** 渡された順に書く。途中で失敗したら、何番目の操作かを添えて DeviceError を投げる */
   async write(operations: WriteOperation[], onProgress?: (progress: WriteProgress) => void): Promise<void> {
     const { keyboard } = this
     for (const [index, operation] of operations.entries()) {
