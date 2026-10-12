@@ -888,3 +888,103 @@
   gap: 0.6rem;
   margin-top: 1.1rem;
 }
+
+.proto .scene-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.3rem 1rem;
+  border-bottom: 1px dashed var(--line);
+  background: repeating-linear-gradient(135deg, var(--bg), var(--bg) 8px, var(--key-none) 8px, var(--key-none) 16px);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.proto .banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 0;
+  padding: 0.6rem 1rem;
+  color: #fff;
+}
+
+.proto .banner-danger {
+  background: #b3261e;
+}
+
+.proto .banner-warning {
+  background: #9a5b00;
+}
+
+.proto .banner button.primary {
+  border-color: #fff;
+  background: #fff;
+  color: #1f2328;
+}
+
+.proto button.chip {
+  border: none;
+}
+
+.proto .chip-off {
+  background: var(--key-none);
+  color: var(--muted);
+}
+
+.proto .stage {
+  max-width: 34rem;
+  margin: 3rem auto;
+  padding: 1.6rem 2rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.proto .stage h2 {
+  margin: 0 0 1rem;
+  font-size: 1.15rem;
+}
+
+.proto .stage h2.ng,
+.proto .changes td.ng {
+  color: var(--danger);
+}
+
+.proto .stage ol {
+  margin: 0 0 1.2rem;
+  padding-left: 1.4rem;
+  line-height: 1.9;
+}
+
+.proto .stage progress {
+  width: 100%;
+  height: 0.9rem;
+  accent-color: var(--accent);
+}
+
+.proto .stage-note {
+  color: var(--muted);
+}
+
+.proto button.big {
+  padding: 0.6rem 2rem;
+  font-size: 1rem;
+}
+
+.proto .plain-list {
+  margin: 0.4rem 0 0.8rem;
+  padding-left: 1.2rem;
+  line-height: 1.9;
+}
+
+.proto .write-dialog p {
+  margin: 0 0 0.7rem;
+}
+
+.proto .write-dialog .write-note {
+  margin-top: 0.9rem;
+  line-height: 1.7;
+}

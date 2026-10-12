@@ -18,6 +18,8 @@ import {
   type Legend,
   type Slot,
 } from './labels.ts'
+import { isScene, type SceneId } from './sceneList.ts'
+import { SceneBanner, SceneBar, SceneBody, SceneDialog } from './Scenes.tsx'
 import './prototype.css'
 
 const UNIT = 64
@@ -86,6 +88,13 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
   // 書き込みが済んだ編集。本体の中身の代わりに持つ（試作では、本体には書かない）
   const [written, setWritten] = useState<Record<string, Behavior>>({})
   const [writing, setWriting] = useState(false)
+  // ?scene=backups のように、見本の場面を URL で選べる
+  const [scene, setScene] = useState<SceneId>(() => {
+    const requested = new URLSearchParams(location.search).get('scene')
+    return isScene(requested) ? requested : 'normal'
+  })
+  const connected = !['disconnected', 'reading', 'read-failed', 'lost', 'unsupported'].includes(scene)
+  const hasSettings = !['disconnected', 'reading', 'read-failed', 'unsupported'].includes(scene)
   const [combos, setCombos] = useState<Combo[]>([])
   // 追加中、または変更中のコンボ
   const [draft, setDraft] = useState<Combo | null>(null)
@@ -154,23 +163,58 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
 
   return (
     <div className="proto">
+      <SceneBar scene={scene} onScene={setScene} />
+      <SceneBanner scene={scene} changes={changes} />
       <header className="proto-header">
         <h1>Cornix キーマッパー</h1>
-        <span className="chip chip-ok">接続済み: Cornix</span>
-        <button type="button" className="quiet">切断</button>
+        {connected ? (
+          <>
+            <button type="button" className="chip chip-ok" title="接続中のキーボードの情報を見る" onClick={() => setScene('device-info')}>
+              接続済み: Cornix ▾
+            </button>
+            <button type="button" className="quiet">
+              切断
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="chip chip-off">{scene === 'reading' ? '接続済み: Cornix' : '未接続'}</span>
+            {scene !== 'reading' && (
+              <button type="button" disabled={scene === 'unsupported'}>
+                接続
+              </button>
+            )}
+          </>
+        )}
         <span className="spacer" />
-        <span className="slots" title="長押しや2回タップを組み合わせたキーが使う枠">
-          Tap Dance 残り <b>{snapshot.capabilities.tapDanceCount - usedTapDances}</b> / {snapshot.capabilities.tapDanceCount}
-        </span>
-        <span className="slots">
-          コンボ 残り <b>{snapshot.capabilities.comboCount - usedCombos}</b> / {snapshot.capabilities.comboCount}
-        </span>
-        <button type="button">.vil に保存</button>
-        <button type="button">.vil を読み込む</button>
-        <button type="button" className="primary" disabled={changes === 0} onClick={() => setWriting(true)}>
-          書き込み（変更 {changes} 件）
-        </button>
+        {hasSettings && (
+          <>
+            <span className="slots" title="長押しや2回タップを組み合わせたキーが使う枠">
+              Tap Dance 残り <b>{snapshot.capabilities.tapDanceCount - usedTapDances}</b> / {snapshot.capabilities.tapDanceCount}
+            </span>
+            <span className="slots">
+              コンボ 残り <b>{snapshot.capabilities.comboCount - usedCombos}</b> / {snapshot.capabilities.comboCount}
+            </span>
+            <button type="button" onClick={() => setScene('backups')}>
+              バックアップ
+            </button>
+            <button type="button" onClick={() => setScene('vil-save')}>
+              .vil に保存
+            </button>
+            <button type="button" onClick={() => setScene('vil-load')}>
+              .vil を読み込む
+            </button>
+            <button type="button" className="primary" disabled={changes === 0 || !connected} onClick={() => setWriting(true)}>
+              書き込み（変更 {changes} 件）
+            </button>
+          </>
+        )}
       </header>
+      <SceneDialog key={scene} scene={scene} onClose={() => setScene('normal')} />
+      {!hasSettings ? (
+        <SceneBody scene={scene} />
+      ) : (
+        <Editor>
 
       <nav className="proto-tabs" aria-label="画面の切り替え">
         <button type="button" aria-pressed={tab === 'keymap'} onClick={() => setTab('keymap')}>
@@ -252,6 +296,8 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
             </section>
           )}
         </>
+      )}
+        </Editor>
       )}
       <Legend />
       {writing && (
@@ -675,6 +721,11 @@ function ComboTab(props: {
       )}
     </>
   )
+}
+
+/** タブから下の、設定を編集する部分 */
+function Editor({ children }: { children: React.ReactNode }) {
+  return <>{children}</>
 }
 
 /** キーの幅に大きな字で収まらない表示か。全角の字は2つぶんに数える */
