@@ -30,11 +30,24 @@ const SLOT_TAGS: Record<Slot, string> = { tap: '', hold: '長押し', doubleTap:
 
 type Selection = { kind: 'key'; index: number } | { kind: 'encoder'; encoder: number; direction: number }
 
+/** コンボ1つ。同時に押すキーは、レイヤーと位置で持つ */
+interface Combo {
+  id: number
+  layer: number
+  keys: number[]
+  output?: number
+}
+
+const MAX_COMBO_KEYS = 4
+
 const editKey = (layer: number, target: Selection) =>
   target.kind === 'key' ? `${layer}:k${target.index}` : `${layer}:e${target.encoder}-${target.direction}`
 
 export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
-  const [tab, setTab] = useState<'keymap' | 'combo'>('keymap')
+  // ?tab=combo で、最初にコンボのタブを開く
+  const [tab, setTab] = useState<'keymap' | 'combo'>(() =>
+    new URLSearchParams(location.search).get('tab') === 'combo' ? 'combo' : 'keymap',
+  )
   // ?layer=1 のように、最初に開くレイヤーを URL で選べる（見比べやすくするため）
   const [layer, setLayer] = useState(() => {
     const requested = Number(new URLSearchParams(location.search).get('layer'))
@@ -53,9 +66,12 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
   )
   // 画面の中だけの編集。キーごとに、編集後の動作を持つ
   const [edits, setEdits] = useState<Record<string, Behavior>>({})
+  const [combos, setCombos] = useState<Combo[]>([])
+  // 追加中、または変更中のコンボ
+  const [draft, setDraft] = useState<Combo | null>(null)
   const usedTapDances = snapshot.tapDances.filter((t) => t.onTap || t.onHold || t.onDoubleTap || t.onTapHold).length
-  const usedCombos = snapshot.combos.filter((c) => c.output !== 0).length
-  const changes = Object.keys(edits).length
+  const usedCombos = snapshot.combos.filter((c) => c.output !== 0).length + combos.length
+  const changes = Object.keys(edits).length + combos.length
 
   const behaviorAt = (at: number, target: Selection): Behavior =>
     edits[editKey(at, target)] ??
@@ -105,40 +121,52 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
         </button>
       </nav>
 
+      <div className="layers" role="group" aria-label="レイヤー">
+        <span className="layers-title">レイヤー</span>
+        {snapshot.keymap.map((keys, index) => (
+          <button
+            type="button"
+            key={index}
+            aria-pressed={layer === index}
+            className={keys.every((code) => code === 0 || code === 1) ? 'empty' : ''}
+            disabled={tab === 'combo' && draft !== null}
+            onClick={() => {
+              setLayer(index)
+              setSelection(null)
+            }}
+          >
+            {index}
+          </button>
+        ))}
+        <button type="button" className="help" popoverTarget="proto-legend" aria-label="キーの見え方">
+          ?
+        </button>
+        <span className="spacer" />
+        <span className="layers-title" title="パソコン側の配列の設定に合わせて、キーの字の見え方を切り替える。本体に書く内容は変わらない">
+          刻印
+        </span>
+        {(['us', 'jis'] as const).map((kind) => (
+          <button type="button" key={kind} aria-pressed={legend === kind} onClick={() => setLegend(kind)}>
+            {kind.toUpperCase()}
+          </button>
+        ))}
+      </div>
+
       {tab === 'combo' ? (
-        <p className="placeholder">コンボのタブは、次の試作で作ります。</p>
+        <ComboTab
+          snapshot={snapshot}
+          legend={legend}
+          layer={layer}
+          combos={combos}
+          draft={draft}
+          remaining={snapshot.capabilities.comboCount - usedCombos}
+          viewAt={viewAt}
+          onLayer={setLayer}
+          onDraft={setDraft}
+          onCombos={setCombos}
+        />
       ) : (
         <>
-          <div className="layers" role="group" aria-label="レイヤー">
-            <span className="layers-title">レイヤー</span>
-            {snapshot.keymap.map((keys, index) => (
-              <button
-                type="button"
-                key={index}
-                aria-pressed={layer === index}
-                className={keys.every((code) => code === 0 || code === 1) ? 'empty' : ''}
-                onClick={() => {
-                  setLayer(index)
-                  setSelection(null)
-                }}
-              >
-                {index}
-              </button>
-            ))}
-            <button type="button" className="help" popoverTarget="proto-legend" aria-label="キーの見え方">
-              ?
-            </button>
-            <span className="spacer" />
-            <span className="layers-title" title="パソコン側の配列の設定に合わせて、キーの字の見え方を切り替える。本体に書く内容は変わらない">
-              刻印
-            </span>
-            {(['us', 'jis'] as const).map((kind) => (
-              <button type="button" key={kind} aria-pressed={legend === kind} onClick={() => setLegend(kind)}>
-                {kind.toUpperCase()}
-              </button>
-            ))}
-          </div>
-
           <KeyboardFigure
             snapshot={snapshot}
             selection={selection}
@@ -164,9 +192,9 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
               <p className="edit-empty">キーをクリックすると、ここで動作を変えられます。</p>
             </section>
           )}
-          <Legend />
         </>
       )}
+      <Legend />
     </div>
   )
 }
@@ -177,8 +205,11 @@ function KeyboardFigure(props: {
   onSelect: (selection: Selection) => void
   viewOf: (target: Selection) => KeyView
   isChanged: (target: Selection) => boolean
+  /** コンボのタブ用。キーに付ける番号（コンボに入っているキー）と、押せるかどうか */
+  comboOrder?: (index: number) => number | undefined
+  canSelect?: (target: Selection) => boolean
 }) {
-  const { snapshot, selection, onSelect, viewOf, isChanged } = props
+  const { snapshot, selection, onSelect, viewOf, isChanged, comboOrder, canSelect } = props
   const keys = useMemo(
     () => placeKeys((snapshot.layout.raw as { layouts?: { keymap?: unknown } }).layouts?.keymap),
     [snapshot],
@@ -204,17 +235,20 @@ function KeyboardFigure(props: {
           const view = viewOf(target)
           const changed = isChanged(target)
           const selected = selection !== null && editKey(0, selection) === editKey(0, target)
+          const order = target.kind === 'key' ? comboOrder?.(target.index) : undefined
           const shape =
             key.kind === 'encoder' ? `encoder ${key.direction === 0 ? 'encoder-left' : 'encoder-right'}` : ''
           return (
             <button
               type="button"
               key={editKey(0, target)}
-              className={`key state-${view.state} ${shape} ${changed ? 'changed' : ''}`}
+              className={`key state-${view.state} ${shape} ${changed ? 'changed' : ''} ${order !== undefined ? 'in-combo' : ''}`}
               aria-pressed={selected}
+              disabled={canSelect ? !canSelect(target) : false}
               style={place(key)}
               onClick={() => onSelect(target)}
             >
+              {order !== undefined && <span className="mark-combo">{order + 1}</span>}
               {key.kind === 'encoder' && (
                 <span className="encoder-turn">{key.direction === 0 ? '↺ 左回し' : '右回し ↻'}</span>
               )}
@@ -224,6 +258,178 @@ function KeyboardFigure(props: {
         })}
       </div>
     </div>
+  )
+}
+
+/** コンボのタブ。一覧と、追加・変更の流れ */
+function ComboTab(props: {
+  snapshot: KeyboardSnapshot
+  legend: Legend
+  layer: number
+  combos: Combo[]
+  draft: Combo | null
+  remaining: number
+  viewAt: (layer: number, target: Selection) => KeyView
+  onLayer: (layer: number) => void
+  onDraft: (draft: Combo | null) => void
+  onCombos: (combos: Combo[]) => void
+}) {
+  const { snapshot, legend, layer, combos, draft, remaining, viewAt, onLayer, onDraft, onCombos } = props
+  // 一覧で選んで、図に示しているコンボ
+  const [shownId, setShownId] = useState<number | null>(null)
+  const shown = draft ?? combos.find((combo) => combo.id === shownId && combo.layer === layer) ?? null
+  const keyName = (at: number, index: number) => {
+    const view = viewAt(at, { kind: 'key', index })
+    const main = SLOTS.find((slot) => view.slots[slot])
+    return main ? view.slots[main]!.short : '（空）'
+  }
+  const isNew = draft !== null && !combos.some((combo) => combo.id === draft.id)
+  const ready = draft !== null && draft.keys.length >= 2 && draft.output !== undefined
+
+  const toggleKey = (target: Selection) => {
+    if (!draft || target.kind !== 'key') return
+    const keys = draft.keys.includes(target.index)
+      ? draft.keys.filter((index) => index !== target.index)
+      : [...draft.keys, target.index]
+    onDraft({ ...draft, keys })
+  }
+  const save = () => {
+    if (!draft) return
+    onCombos(isNew ? [...combos, draft] : combos.map((combo) => (combo.id === draft.id ? draft : combo)))
+    setShownId(draft.id)
+    onDraft(null)
+  }
+
+  return (
+    <>
+      <KeyboardFigure
+        snapshot={snapshot}
+        selection={null}
+        onSelect={toggleKey}
+        viewOf={(target) => viewAt(layer, target)}
+        isChanged={() => false}
+        comboOrder={(index) => {
+          const order = shown?.keys.indexOf(index) ?? -1
+          return order >= 0 ? order : undefined
+        }}
+        canSelect={(target) =>
+          draft === null ||
+          (target.kind === 'key' &&
+          (draft.keys.includes(target.index) || draft.keys.length < MAX_COMBO_KEYS) &&
+            viewAt(layer, target).state !== 'none' &&
+            viewAt(layer, target).state !== 'transparent')
+        }
+      />
+
+      {draft ? (
+        <section className="edit" aria-label="コンボの追加">
+          <div className="edit-head">
+            <h2>{isNew ? 'コンボを追加' : 'コンボを変更'}（レイヤー {draft.layer} の配置で決める）</h2>
+            <button type="button" onClick={() => onDraft(null)}>
+              やめる
+            </button>
+            <button type="button" className="primary" disabled={!ready} onClick={save}>
+              {isNew ? '追加する' : '変更する'}
+            </button>
+          </div>
+          <div className="combo-steps">
+            <div className="field">
+              <span className="field-name">1. 同時に押すキー（上の図でクリック。2〜{MAX_COMBO_KEYS} 個）</span>
+              <div className={`field-box combo-keys ${draft.keys.length === 0 ? 'unset' : ''}`}>
+                {draft.keys.length === 0 && <span className="picker-empty">まだ選んでいません</span>}
+                {draft.keys.map((index, order) => (
+                  <span className="combo-chip" key={index}>
+                    <b>{order + 1}</b>
+                    {keyName(draft.layer, index)}
+                    <button
+                      type="button"
+                      aria-label="このキーを外す"
+                      onClick={() => onDraft({ ...draft, keys: draft.keys.filter((k) => k !== index) })}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="field">
+              <span className="field-name">2. 同時に押した時に出す動作</span>
+              <div className={`field-box active ${draft.output === undefined ? 'unset' : ''}`}>
+                <span className="field-value">
+                  {draft.output === undefined ? '（下から選ぶ）' : labelOf(draft.output, snapshot, legend).full}
+                </span>
+              </div>
+            </div>
+          </div>
+          <ActionPicker
+            snapshot={snapshot}
+            legend={legend}
+            slot="tap"
+            slotName="出す動作"
+            layerCount={snapshot.keymap.length}
+            current={draft.output}
+            onPick={(output) => onDraft({ ...draft, output })}
+          />
+        </section>
+      ) : (
+        <section className="edit" aria-label="コンボの一覧">
+          <div className="edit-head">
+            <h2>コンボ（複数のキーを同時に押した時の動作）</h2>
+            <button
+              type="button"
+              className="primary"
+              disabled={remaining <= 0}
+              onClick={() => onDraft({ id: Date.now(), layer, keys: [] })}
+            >
+              コンボを追加
+            </button>
+          </div>
+          {combos.length === 0 ? (
+            <p className="edit-empty">
+              まだコンボはありません。「コンボを追加」を押してから、上の図で同時に押すキーを選びます。
+            </p>
+          ) : (
+            <ul className="combo-list">
+              {combos.map((combo) => (
+                <li key={combo.id} className={shown?.id === combo.id ? 'shown' : ''}>
+                  <button
+                    type="button"
+                    className="combo-row"
+                    title="図で、このコンボのキーを示す"
+                    onClick={() => {
+                      onLayer(combo.layer)
+                      setShownId(combo.id)
+                    }}
+                  >
+                    <span className="combo-layer">レイヤー {combo.layer}</span>
+                    {combo.keys.map((index, order) => (
+                      <span className="combo-chip" key={index}>
+                        <b>{order + 1}</b>
+                        {keyName(combo.layer, index)}
+                      </span>
+                    ))}
+                    <span className="combo-arrow">→</span>
+                    <strong>{combo.output === undefined ? '' : labelOf(combo.output, snapshot, legend).full}</strong>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onLayer(combo.layer)
+                      onDraft(combo)
+                    }}
+                  >
+                    変更
+                  </button>
+                  <button type="button" onClick={() => onCombos(combos.filter((c) => c.id !== combo.id))}>
+                    削除
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+    </>
   )
 }
 

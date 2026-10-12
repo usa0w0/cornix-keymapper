@@ -8,6 +8,8 @@
   --accent-soft: #e4edff;
   --ok: #1b6e2d;
   --changed: #d97706;
+  --combo: #0f8a7e;
+  --combo-soft: #dff5f2;
   --key: #ffffff;
   --key-none: #eceef1;
   min-height: 100vh;
@@ -28,6 +30,8 @@
     --accent-soft: #23314f;
     --ok: #5fd07a;
     --changed: #f5a524;
+    --combo: #35b8aa;
+    --combo-soft: #17403c;
     --key: #2a2e34;
     --key-none: #1b1e22;
   }
@@ -683,4 +687,103 @@
   .proto .fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+.proto .figure .key:disabled {
+  opacity: 0.35;
+}
+
+.proto .key.in-combo {
+  border-color: var(--combo);
+  background: var(--combo-soft);
+  box-shadow: 0 0 0 2px var(--combo);
+  z-index: 1;
+}
+
+.proto .mark-combo,
+.proto .combo-chip b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--combo);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.proto .mark-combo {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+}
+
+.proto .combo-steps {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 0.6rem;
+}
+
+.proto .field-box.combo-keys {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-height: 2.2rem;
+  padding: 0.2rem 0.5rem;
+}
+
+.proto .field-box span.field-value {
+  padding: 0.35rem 0.75rem;
+}
+
+.proto .combo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.45rem 0.1rem 0.2rem;
+  border: 1px solid var(--combo);
+  border-radius: 999px;
+  background: var(--combo-soft);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.proto .combo-chip button {
+  padding: 0 0.2rem;
+  color: var(--muted);
+}
+
+.proto .combo-list {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.proto .combo-list li {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.proto .combo-list .combo-row {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  text-align: left;
+}
+
+.proto .combo-list li.shown .combo-row {
+  border-color: var(--combo);
+  box-shadow: 0 0 0 1px var(--combo);
+}
+
+.proto .combo-layer,
+.proto .combo-arrow {
+  color: var(--muted);
+  font-size: 0.85rem;
 }
