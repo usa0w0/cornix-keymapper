@@ -55,40 +55,35 @@ function App({ connector, supported = isWebHidSupported() }: Props) {
         onDisconnect={close}
         onDeviceInfo={showInfo}
       />
-      {!device || !reading ? (
-        <ConnectStage
-          supported={supported}
-          connecting={connection.status === 'connecting'}
-          notice={connection.status === 'disconnected' ? connection.notice : undefined}
-          onConnect={connect}
-        />
-      ) : reading.status === 'reading' ? (
-        <ReadingStage progress={reading.progress} />
-      ) : reading.status === 'failed' ? (
-        <ReadFailedStage failure={reading.failure} onRetry={() => read(device)} />
-      ) : (
-        <>
-          <nav className="app-tabs" aria-label="画面の切り替え">
-            {TABS.map(({ id, name }) => (
-              <button type="button" key={id} aria-pressed={tab === id} onClick={() => setTab(id)}>
-                {name}
-              </button>
-            ))}
-          </nav>
-          <main>
-            {tab === 'keymap' ? (
-              <KeymapView snapshot={reading.report.snapshot} />
-            ) : (
-              <p className="placeholder">コンボの設定は準備中です。</p>
-            )}
-          </main>
-          <DeviceInfoDialog
-            ref={info}
-            device={device}
-            report={reading.report}
-            onReport={(next) => replace(device, next)}
+      {report && (
+        <nav className="app-tabs" aria-label="画面の切り替え">
+          {TABS.map(({ id, name }) => (
+            <button type="button" key={id} aria-pressed={tab === id} onClick={() => setTab(id)}>
+              {name}
+            </button>
+          ))}
+        </nav>
+      )}
+      <main>
+        {!device || !reading ? (
+          <ConnectStage
+            supported={supported}
+            connecting={connection.status === 'connecting'}
+            notice={connection.status === 'disconnected' ? connection.notice : undefined}
+            onConnect={connect}
           />
-        </>
+        ) : reading.status === 'reading' ? (
+          <ReadingStage progress={reading.progress} />
+        ) : reading.status === 'failed' ? (
+          <ReadFailedStage failure={reading.failure} onRetry={() => read(device)} />
+        ) : tab === 'keymap' ? (
+          <KeymapView snapshot={reading.report.snapshot} />
+        ) : (
+          <p className="placeholder">コンボの設定は準備中です。</p>
+        )}
+      </main>
+      {device && report && (
+        <DeviceInfoDialog ref={info} device={device} report={report} onReport={(next) => replace(device, next)} />
       )}
     </div>
   )

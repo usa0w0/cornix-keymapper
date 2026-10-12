@@ -10,7 +10,7 @@ import { ReadResult } from './Diagnostics.tsx'
 import { buildReadReport, describeReadError } from './readReport.ts'
 import { ConnectStage, ReadFailedStage, ReadingStage } from './Stage.tsx'
 import { describeError, formatDuration, type ConnectionState } from './useConnection.ts'
-import { readReportFrom } from './useDeviceRead.ts'
+import { readReportFrom, readStateFor, replaceReport, runRead, type HeldRead } from './useDeviceRead.ts'
 
 const device: KeyboardDevice = {
   name: 'Cornix',
@@ -49,7 +49,8 @@ const count = (html: string, needle: string) => html.split(needle).length - 1
 test('接続前の画面: ヘッダーは「未接続」と「接続」、図の代わりに、つなぎ方の手順のカードを出す', () => {
   const html = renderToStaticMarkup(<App connector={createFakeCornix()} supported />)
   expect(html).toContain('<span class="chip chip-off" aria-live="polite">未接続</span><button type="button">接続</button>')
-  expect(html).toContain('Cornix をつないで、設定を読み込みます')
+  // カードは、画面の主な中身（main）の中に出す
+  expect(html).toContain('<main><section class="stage" aria-label="接続"><h2>Cornix をつないで、設定を読み込みます</h2>')
   expect(html).toContain('<button type="button" class="primary big">接続</button>')
   // 警告の帯、残り枠数、保存と書き込みのボタン、タブ、図は出さない
   expect(html).not.toContain('banner')
@@ -185,4 +186,101 @@ test('読み出しの記録: 前回の内容を渡すと、違っていた数を
   keyboard.snapshot.keymap[0][0] = 0x0005
   expect((await readReportFrom(fake, first.snapshot)).differencesFromPrevious).toBe(1)
   await expect(readReportFrom(fake, first.snapshot)).rejects.toMatchObject({ kind: 'timeout', step: 'キーマップ' })
+})
+
+/** 画面の状態の置き場の代わり。runRead が知らせた状態を、順に残す */
+function heldStore() {
+  let held: HeldRead | null = null
+  const history: HeldRead[] = []
+  return {
+    get: () => held,
+    history,
+    set: (update: (current: HeldRead | null) => HeldRead | null) => {
+      const next = update(held)
+      if (next && next !== held) history.push(next)
+      held = next
+    },
+  }
+}
+
+test('読み出しの流れ: 読み込み中 → いま読んでいるもの → 読み終えた内容、の順に知らせる', async () => {
+  const fake = await createFakeCornix().connect()
+  const store = heldStore()
+  await runRead(fake, 1, store.set)
+
+  expect(store.history[0].state).toEqual({ status: 'reading', progress: null })
+  expect(store.history[2].state).toEqual({ status: 'reading', progress: { step: 'キーマップ', done: 0, total: 1 } })
+  expect(store.history.at(-1)!.state).toMatchObject({ status: 'done', report: { snapshot: cornixSnapshot() } })
+  expect(readStateFor(store.get(), fake)).toBe(store.get()!.state)
+})
+
+test('読み出しの流れ: 失敗したら、読みかけの内容を持たず、原因だけを知らせる', async () => {
+  const fake = await createFakeCornix({ failures: { failReadAt: { read: 1 } } }).connect()
+  const store = heldStore()
+  await runRead(fake, 1, store.set)
+  expect(store.get()!.state).toEqual({
+    status: 'failed',
+    failure: describeReadError(new DeviceError('timeout', { step: 'キーマップ' })),
+  })
+})
+
+test('読み出しの途中で機器が替わったら、前の機器の進み具合と結果で、いまの状態を上書きしない', async () => {
+  const oldKeyboard = createFakeCornix({ name: '前の機器', stepDelayMs: 5 })
+  const newKeyboard = createFakeCornix({ name: '次の機器', stepDelayMs: 20 })
+  newKeyboard.snapshot.keymap[0][0] = 0x0005
+  const [before, after] = [await oldKeyboard.connect(), await newKeyboard.connect()]
+  const store = heldStore()
+
+  const first = runRead(before, 1, store.set)
+  // 前の機器を読んでいる途中で、次の機器の読み出しを始める。前の機器のほうが先に読み終わる
+  await new Promise((resolve) => setTimeout(resolve, 8))
+  expect(store.get()).toMatchObject({ device: before, state: { status: 'reading' } })
+  const second = runRead(after, 2, store.set)
+  await first
+
+  // 前の機器が読み終わっても、状態は次の機器の読み込み中のまま
+  expect(store.get()).toMatchObject({ device: after, run: 2, state: { status: 'reading' } })
+  const startOfSecond = store.history.findIndex((held) => held.run === 2)
+  expect(store.history.slice(startOfSecond).every((held) => held.device === after)).toBe(true)
+
+  await second
+  expect(store.get()).toMatchObject({ device: after, state: { status: 'done' } })
+  expect((store.get()!.state as { report: { snapshot: { keymap: number[][] } } }).report.snapshot.keymap[0][0]).toBe(0x0005)
+})
+
+test('読み出しの途中で切断したら、後から届いた結果は画面に出さない。つなぎ直した機器は、読み込み中から始める', async () => {
+  const keyboard = createFakeCornix({ stepDelayMs: 5 })
+  const before = await keyboard.connect()
+  const store = heldStore()
+  const pending = runRead(before, 1, store.set)
+
+  // 切断すると、接続中の機器がなくなる
+  expect(readStateFor(store.get(), null)).toBeNull()
+  await before.disconnect()
+  await pending
+  // 切断した機器の読み出しは失敗として残るが、どの機器にもつながっていない間は出さない
+  expect(store.get()).toMatchObject({ device: before, state: { status: 'failed' } })
+  expect(readStateFor(store.get(), null)).toBeNull()
+
+  // つなぎ直した機器には、前の機器の失敗を出さない
+  const again = await keyboard.connect()
+  expect(readStateFor(store.get(), again)).toEqual({ status: 'reading', progress: null })
+})
+
+test('診断で読み直した結果は、その機器の読み出しが終わっている時だけ入れ替える', async () => {
+  const keyboard = createFakeCornix()
+  const fake = await keyboard.connect()
+  const other = await createFakeCornix().connect()
+  const store = heldStore()
+  const reread = await readReportFrom(fake, null)
+
+  // 読み込み中は入れ替えない
+  const reading: HeldRead = { device: fake, run: 1, state: { status: 'reading', progress: null } }
+  expect(replaceReport(reading, fake, reread)).toBe(reading)
+  expect(replaceReport(null, fake, reread)).toBeNull()
+
+  await runRead(fake, 1, store.set)
+  // 別の機器の結果では入れ替えない
+  expect(replaceReport(store.get(), other, reread)).toBe(store.get())
+  expect(replaceReport(store.get(), fake, reread)).toMatchObject({ device: fake, run: 1, state: { status: 'done', report: reread } })
 })
