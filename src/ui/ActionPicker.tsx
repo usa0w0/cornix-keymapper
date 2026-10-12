@@ -14,7 +14,16 @@ import {
   type ModKind,
   type PickerContext,
 } from '../model/action.ts'
-import { actionId, BOARD_BLOCKS, boardAction, boardFace, cellWidth, isCurrent, layerChoices } from './pickerBoard.ts'
+import {
+  actionId,
+  BOARD_BLOCKS,
+  boardAction,
+  boardFace,
+  cellWidth,
+  isCurrent,
+  layerChoices,
+  layerStartId,
+} from './pickerBoard.ts'
 
 export interface ActionPickerProps {
   /** 動作を入れる先。入れられない動作は出さない */
@@ -71,7 +80,8 @@ export function ActionPicker({ slot, slotName, current, layerCount, layerModes, 
             ))}
           </div>
           {category === 'keyboard' && <KeyboardChoices {...choice} />}
-          {category === 'layer' && <LayerChoices {...choice} />}
+          {/* 欄か、いま入っている切り替え方が変わったら、選んでいた切り替え方を捨てて作り直す */}
+          {category === 'layer' && <LayerChoices key={layerStartId(slot, current)} {...choice} />}
           {category === 'other' && <OtherChoices {...choice} />}
         </>
       )}
@@ -161,7 +171,7 @@ export function LayerChoices({ context, legend, current, onPick }: ChoiceProps) 
   if (modes.length === 0 || layers.length === 0) {
     return <p className="picker-empty">この欄に入れられるレイヤー切り替えは、ありません。</p>
   }
-  // 欄が変わって、選んでいた切り替え方が使えなくなった時は、最初のものにする
+  // いま入っている切り替え方が、この欄で選べないものの時は、最初のものにする
   const mode = selected !== undefined && modes.includes(selected) ? selected : modes[0]
 
   return (

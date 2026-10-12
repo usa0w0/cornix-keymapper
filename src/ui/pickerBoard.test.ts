@@ -11,6 +11,7 @@ import {
   cellWidth,
   isCurrent,
   layerChoices,
+  layerStartId,
   type BoardCell,
 } from './pickerBoard.ts'
 
@@ -133,4 +134,15 @@ test('存在しないレイヤーと、使えない方式は、選択肢に出�
   expect(layerChoices(context('tap', { layerModes: ['momentary', 'oneShot'] })).modes).toEqual(['oneShot'])
   expect(layerChoices(context('hold', { layerModes: ['toggle', 'to', 'oneShot'] }))).toEqual({ modes: [], layers: [] })
   expect(layerChoices(context('tap', { layerCount: 0 }))).toEqual({ modes: [], layers: [] })
+})
+
+test('切り替え方の選択は、欄か、いま入っている切り替え方が変わった時にだけ始め直す', () => {
+  const toggle1: Action = { kind: 'layer', mode: 'toggle', layer: 1 }
+  // 欄が変わった時と、切り替え方の違う動作が入った時
+  expect(layerStartId('tap', toggle1)).not.toBe(layerStartId('doubleTap', toggle1))
+  expect(layerStartId('tap', toggle1)).not.toBe(layerStartId('tap', { kind: 'layer', mode: 'oneShot', layer: 1 }))
+  expect(layerStartId('tap', toggle1)).not.toBe(layerStartId('tap', undefined))
+  // 切り替え先だけが変わった時と、レイヤー切り替えでない動作どうしでは、選びかけの切り替え方を保つ
+  expect(layerStartId('tap', toggle1)).toBe(layerStartId('tap', { ...toggle1, layer: 2 }))
+  expect(layerStartId('tap', undefined)).toBe(layerStartId('tap', { kind: 'key', code: 0x04, mods: [] }))
 })

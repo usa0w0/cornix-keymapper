@@ -5,6 +5,7 @@ import {
   LAYER_MODES,
   MOD_KINDS,
   type Action,
+  type ActionSlot,
   type LayerMode,
   type Legend,
   type Mod,
@@ -122,3 +123,10 @@ export function layerChoices(context: PickerContext): { modes: LayerMode[]; laye
     layers: [...new Set(placeable.map((action) => action.layer))],
   }
 }
+
+/**
+ * 切り替え方の選択を、どこから始めるかを表す文字列。欄と、いま入っている切り替え方で決まる。
+ * これが変わったら、利用者が選びかけていた切り替え方を捨てて、いま入っている動作に合わせ直す
+ */
+export const layerStartId = (slot: ActionSlot, current: Action | undefined) =>
+  `${slot}:${current?.kind === 'layer' ? current.mode : ''}`
