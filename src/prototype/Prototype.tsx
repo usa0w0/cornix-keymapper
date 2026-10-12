@@ -287,8 +287,6 @@ function EditPanel(props: {
     delete rest[slot]
     onChange(Object.keys(rest).length > 0 ? { state: 'normal', slots: rest } : { state: 'none', slots: {} })
   }
-  const emptyName = behavior.state === 'transparent' ? '透過' : '何もしない'
-
   return (
     <section className="edit" aria-label="選んだキー">
       <div className="edit-head">
@@ -301,6 +299,15 @@ function EditPanel(props: {
             ? `エンコーダー ${selection.encoder + 1} の${selection.direction === 0 ? '左回し' : '右回し'}`
             : `行 ${Math.floor(selection.index / cols)} 列 ${selection.index % cols} のキー`}
         </h2>
+        {behavior.state !== 'transparent' && (
+          <button
+            type="button"
+            title="このキーを空にして、下のレイヤーの動作がそのまま効くようにする"
+            onClick={() => onChange({ state: 'transparent', slots: {} })}
+          >
+            透過にする
+          </button>
+        )}
         {changed && (
           <button type="button" onClick={() => onChange(null)}>
             変更を取り消す
@@ -314,19 +321,22 @@ function EditPanel(props: {
       )}
       {view.state === 'transparent' && (
         <p className="edit-note">
-          透過のキーです。下のレイヤーの動作（{view.inherited?.slots.tap?.full ?? '何もしない'}）がそのまま効きます。
+          透過のキーです。下のレイヤーの動作（{view.inherited?.slots.tap?.full ?? '何もしない'}
+          ）がそのまま効きます。欄に動作を入れると、透過ではなくなります。
         </p>
+      )}
+      {view.state === 'none' && (
+        <p className="edit-note">欄がすべて空なので、このキーは押しても何も起きません。</p>
       )}
       <div className={`fields ${isEncoder ? 'fields-one' : ''}`}>
         {(isEncoder ? (['tap'] as Slot[]) : SLOTS).map((slot) => {
           const label = view.slots[slot]
-          const isEmptyTap = slot === 'tap' && behavior.state !== 'normal'
           return (
             <div className="field" key={slot}>
               <span className="field-name">{isEncoder ? '回した時' : SLOT_NAMES[slot]}</span>
               <div className={`field-box ${label ? '' : 'unset'} ${active === slot ? 'active' : ''}`}>
                 <button type="button" className="field-value" aria-pressed={active === slot} onClick={() => setActive(slot)}>
-                  {label?.full ?? (isEmptyTap ? emptyName : '（なし）')}
+                  {label?.full ?? '（なし）'}
                 </button>
                 {label && (
                   <button type="button" className="field-clear" aria-label={`${SLOT_NAMES[slot]}を消す`} title="この欄を消す" onClick={() => clear(slot)}>
@@ -346,7 +356,6 @@ function EditPanel(props: {
         layerCount={snapshot.keymap.length}
         current={behavior.slots[active]}
         onPick={pick}
-        onPickEmpty={(state) => onChange({ state, slots: {} })}
       />
     </section>
   )
@@ -361,9 +370,8 @@ function ActionPicker(props: {
   layerCount: number
   current?: number
   onPick: (code: number) => void
-  onPickEmpty: (state: 'none' | 'transparent') => void
 }) {
-  const { snapshot, legend, slot, slotName, layerCount, current, onPick, onPickEmpty } = props
+  const { snapshot, legend, slot, slotName, layerCount, current, onPick } = props
   const [category, setCategory] = useState('keyboard')
   const [query, setQuery] = useState('')
   const [mods, setMods] = useState(0)
@@ -372,8 +380,6 @@ function ActionPicker(props: {
     { id: 'keyboard', name: 'キーボード' },
     { id: 'layer', name: 'レイヤー切り替え' },
     { id: 'media', name: 'メディア・その他' },
-    // 「透過」と「何もしない」は、タップの欄にだけ入れられる
-    ...(slot === 'tap' ? [{ id: 'empty', name: '何もしない・透過' }] : []),
   ]
   const shown = tabs.some((t) => t.id === category) ? category : 'keyboard'
   // 「押している間だけ」は、長押しの欄とタップ後長押しの欄にだけ入れられる
@@ -490,16 +496,6 @@ function ActionPicker(props: {
                 ))}
               </div>
             </>
-          ) : shown === 'empty' ? (
-            <div className="picker-row">
-              <button type="button" className="chip-key" onClick={() => onPickEmpty('none')}>
-                何もしない
-              </button>
-              <button type="button" className="chip-key" onClick={() => onPickEmpty('transparent')}>
-                透過（下のレイヤーの動作がそのまま効く）
-              </button>
-              <span className="picker-empty">どちらも、ほかの欄（長押しなど）とは組み合わせられません。</span>
-            </div>
           ) : (
             <div className="chips">{CATEGORIES.find((c) => c.id === 'media')!.codes.map((code) => chip(code, true))}</div>
           )}
@@ -527,7 +523,7 @@ function Legend() {
       }),
     },
     { name: '長押しだけ', view: sample({ hold: { short: 'レイヤー 2', note: '押している間', full: '' } }) },
-    { name: '何もしない', view: sample({}, 'none') },
+    { name: '空（何もしない）', view: sample({}, 'none') },
     { name: '透過', view: { state: 'transparent', slots: {}, inherited: sample({ tap: a }) } },
     { name: '編集不可', view: sample({ tap: { short: 'BT0', full: '' } }, 'locked') },
     { name: '変更あり', view: sample({ tap: a }), changed: true },
