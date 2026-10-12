@@ -66,6 +66,7 @@ src/
       vialDevice.ts  KeyboardDevice の実装
       testing/       テスト用。要求に応答を返す、まねの本体
     fake/            メモリ上の偽の機器。失敗をわざと起こせる
+    fixtures/        実機から取った記録。テストと、偽の機器の初期値に使う
   model/             純粋なロジック（React にも WebHID にも依存しない）
     keycodes.ts      Vial のキーコード（数値・名前）と動作（Action）の相互変換
     action.ts        動作の型と分類・日本語の表示名・検索
@@ -115,13 +116,13 @@ interface KeyboardDevice {
   protocol: string                                       // 画面に出す通信方式（例: VIA プロトコル 9）
   onDisconnect(listener: () => void): () => void         // 切断の通知
   read(onProgress): Promise<KeyboardSnapshot>
-  write(operations: WriteOperation[], onProgress): Promise<void>   // 渡された順に書く（未実装）
+  write(operations: WriteOperation[], onProgress): Promise<void>   // 渡された順に書く
   exchangeCount(): number                                // 診断用。接続してからの通信の回数
   exchanges(since?: number): ExchangeRecord[]            // 診断用。通信の記録（since 以降の分）
   disconnect(): Promise<void>
 }
 
-// 1キー、1エンコーダー、1枠、1コンボを書く操作
+// 1キー、エンコーダーの1方向、Tap Dance の1枠、コンボの1枠を書く操作
 type WriteOperation = /* setKey | setEncoder | setTapDance | setCombo */
 
 // 失敗の種類。画面はこれを見て文言を出す
@@ -130,7 +131,8 @@ type DeviceErrorKind = 'timeout' | 'send-failed' | 'disconnected' | 'unexpected-
 
 - スナップショットは「本体の表現」のまま持つ（キーコードは数値、Tap Dance は番号付き）。`.vil` とバックアップも同じスナップショットから作るので、このサイトが解釈できないキーコードも失わない
 - 読み出しをまとめて1つにするのは、バックアップ、照合、差分の単位をそろえるため。書き込みを差分だけにするのは、Bluetooth での通信の回数と、本体が書きかけの状態でいる時間を短くするため
-- `write` は途中で失敗したら、何番目の操作で、どの種類の失敗かを返す
+- `write` は途中で失敗したら、何番目の操作で、どの種類の失敗かを返す（`DeviceError` の `operation` と `kind`。それより前の操作は書き終えている）
+- 偽の機器（`device/fake/`）は、実機から読んだ設定（`src/device/fixtures/cornix/`）を初期値にする。URL に `?fake` を付けて開くと、実機の代わりに偽の機器につながる（開発版でもリリース版でも使える。偽の機器のコードは、その時だけ読み込む）。書いた設定は、ページを開いている間、つなぎ直しても残る
 - `read` は途中で失敗したら、読んだ内容を捨て、どこを読んでいたか（`step`）と失敗の種類を返す
 - `exchanges` は、要求と応答の組と、かかった時間の記録。実機での確認と、テスト用データの採取に使う
 - このサイトで扱わない設定（マクロ、Key Override、QMK Settings）は読まないので、スナップショットに入らない。キーに割り当てられた対象外のキーコード（マクロを呼ぶキーなど）は、`keymap` の数値として残る
@@ -365,7 +367,7 @@ Vial のコンボは、キーの位置ではなくキーコードの組（最大
 - `session/`: 偽の機器と偽の保存先を使った単体テスト。失敗する経路ごとに、本体が最後にどの状態になるか、バックアップに何が残るかを確かめる
   - 偽の機器には「N 番目の書き込みで失敗する」「途中で切断する」「読み直しで違う値を返す」を指定できるようにする
   - 確かめる経路: 途中の失敗からの再試行、途中の失敗からの復元、照合の不一致、書き込み前に本体が変わっていた場合、バックアップの保存の失敗、「書き込み中」の印が残った状態からの再開
-- `device/vial/`: 要求を受けて応答を返す偽の transport を使った単体テスト。実機から取った応答を記録して使う（`src/device/vial/testing/cornix/`。USB と Bluetooth の読み出しの記録と、同じ時に Vial で保存した `.vil`。UID だけ、にせの値に置き換えてある）。応答が待ち時間を超えて遅れる場合も含める
+- `device/vial/`: 要求を受けて応答を返す偽の transport を使った単体テスト。実機から取った応答を記録して使う（`src/device/fixtures/cornix/`。USB と Bluetooth の読み出しの記録と、同じ時に Vial で保存した `.vil`。UID だけ、にせの値に置き換えてある）。応答が待ち時間を超えて遅れる場合も含める
 - 画面: 偽の機器を使って手で確認する。部品のテストは必要になったら `.test.tsx` に足す（テストの対象に `.test.tsx` を含める）
 - 実機での確認: 完了条件に対応する手順を、作業ごとに PR に書く
 
@@ -386,6 +388,7 @@ Vial のコンボは、キーの位置ではなくキーコードの組（最大
 設計どおりになっていない箇所。直したら、この節から消す。
 
 - `src/device/vial/transport.ts` に、応答の突き合わせと、タイムアウト後の同期のやり直しがない
+- `src/device/vial/vialDevice.ts` の `write` は、呼ぶと必ず失敗する（書き込みは #15 で作る）。偽の機器の `write` は動く
 
 ## 実機で確かめること
 
@@ -395,7 +398,7 @@ Vial のコンボは、キーの位置ではなくキーコードの組（最大
 
 - Bluetooth 接続の本体が WebHID の機器選択に出て、USB と同じ usage page の指定で接続できる（2026-10-10、接続と切断の画面で確認）
 
-以下は 2026-10-12 に、読み出しだけの最小版で確かめた。本体は Cornix LP（定義に書かれたファームウェアの版は V1.12）。USB と Bluetooth で1回ずつ読み出し、同じ時に Vial で保存した `.vil` と比べた。記録は `src/device/vial/testing/cornix/` に置いた。番号は、確かめる前の一覧の番号。
+以下は 2026-10-12 に、読み出しだけの最小版で確かめた。本体は Cornix LP（定義に書かれたファームウェアの版は V1.12）。USB と Bluetooth で1回ずつ読み出し、同じ時に Vial で保存した `.vil` と比べた。記録は `src/device/fixtures/cornix/` に置いた。番号は、確かめる前の一覧の番号。
 
 - 1（一部）. 読み出し1回は 154 往復。USB は全体で 0.3 秒（1往復 2 ミリ秒ほど）、Bluetooth は全体で 5.3 秒（1往復はふつう 30 ミリ秒、最も遅いもので 498 ミリ秒が1回）。どちらもタイムアウトは 0 回で、1 秒を超えた応答はなかった。USB と Bluetooth で、応答の中身はすべて同じだった
 - 2. 要求と同じ内容を先頭に返すのは VIA のコマンドだけ。`0x01` と `0x11` はコマンド番号を、`0x12` はコマンド番号・位置・大きさ（4 バイト）を返す。Vial（`0xFE`）のコマンドは返さず、応答の先頭からデータが入る
