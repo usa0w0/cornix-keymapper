@@ -18,9 +18,22 @@ export function effectiveBelow(
   layer: number,
   keycodeAt: (layer: number) => number | undefined,
 ): EffectiveKeycode | undefined {
+  const found = firstBelow(layer, keycodeAt, (keycode) => keycode === KC_TRANSPARENT)
+  return found && { layer: found.layer, keycode: found.value }
+}
+
+/**
+ * effectiveBelow と同じたどり方を、キーコード以外の値（編集を当てはめた後のキーの動作など）で行う。
+ * valueAt は、同じ場所の、そのレイヤーでの値を返す（その場所がなければ undefined）
+ */
+export function firstBelow<T>(
+  layer: number,
+  valueAt: (layer: number) => T | undefined,
+  isTransparent: (value: T) => boolean,
+): { layer: number; value: T } | undefined {
   for (let below = layer - 1; below >= 0; below--) {
-    const keycode = keycodeAt(below)
-    if (keycode !== undefined && keycode !== KC_TRANSPARENT) return { layer: below, keycode }
+    const value = valueAt(below)
+    if (value !== undefined && !isTransparent(value)) return { layer: below, value }
   }
   return undefined
 }

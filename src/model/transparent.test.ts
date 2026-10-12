@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { effectiveBelow } from './transparent.ts'
+import { effectiveBelow, firstBelow } from './transparent.ts'
 
 const KC_TRNS = 0x0001
 const KC_A = 0x0004
@@ -31,4 +31,10 @@ test('レイヤー 0 まですべて透過なら、効く動作はない', () =>
 
 test('本体から読んだ設定にないレイヤーは飛ばす', () => {
   expect(effectiveBelow(3, (layer) => (layer === 0 ? KC_A : undefined))).toEqual({ layer: 0, keycode: KC_A })
+})
+
+test('キーコード以外の値でも、同じたどり方ができる（編集を当てはめた後の動作など）', () => {
+  const at = (layer: number) => ['a', undefined, '透過', '透過'][layer]
+  expect(firstBelow(3, at, (value) => value === '透過')).toEqual({ layer: 0, value: 'a' })
+  expect(firstBelow(0, at, (value) => value === '透過')).toBeUndefined()
 })

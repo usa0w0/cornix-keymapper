@@ -39,3 +39,20 @@ export const isNone = (behavior: KeyBehavior) => behavior.tap?.kind === 'none'
 /** このサイトで扱わない動作を含むキーか。編集不可として見せる */
 export const isUnsupported = (behavior: KeyBehavior) =>
   BEHAVIOR_SLOTS.some((slot) => behavior[slot]?.kind === 'unsupported')
+
+/**
+ * 欄に動作を入れた後のキーの動作。
+ * 何もしないキーと透過のキーは、その欄だけのキーになる（透過のキーに動作を入れると、透過ではなくなる）。
+ * 編集不可のキーも、その欄だけのキーになる（別の動作での上書き。ほかの欄の内容は残さない）
+ */
+export function withSlot(behavior: KeyBehavior, slot: BehaviorSlot, action: Action): KeyBehavior {
+  const base = isNone(behavior) || isTransparent(behavior) || isUnsupported(behavior) ? {} : behavior
+  return { ...base, [slot]: action }
+}
+
+/** 欄を消した後のキーの動作。4つとも空になったら、何もしないキー */
+export function withoutSlot(behavior: KeyBehavior, slot: BehaviorSlot): KeyBehavior {
+  const rest = { ...behavior }
+  delete rest[slot]
+  return filledSlots(rest).length > 0 ? rest : { tap: { kind: 'none' } }
+}

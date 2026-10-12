@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, test } from 'vitest'
 import type { KeyboardSnapshot } from '../device/types.ts'
 import recorded from '../device/fixtures/cornix/usb.json'
+import { loadSnapshot } from '../session/editState.ts'
 import { KeyFace } from './KeyboardFigure.tsx'
 import { KeymapView } from './KeymapView.tsx'
 
@@ -11,7 +12,7 @@ const cornix = recorded.snapshot as unknown as KeyboardSnapshot
 const count = (html: string, needle: string) => html.split(needle).length - 1
 
 test('レイヤーの行と、レイアウト定義どおりの数のキーとエンコーダーを出す', () => {
-  const html = renderToStaticMarkup(<KeymapView snapshot={cornix} />)
+  const html = renderToStaticMarkup(<KeymapView state={loadSnapshot(cornix)} onAction={() => {}} />)
   // レイヤー 10 枚ぶんのボタン。最初はレイヤー 0 と、刻印の US が選ばれている
   for (let layer = 0; layer < 10; layer++) expect(html).toMatch(new RegExp(`<button[^>]*>${layer}</button>`))
   expect(html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>0<\/button>/)
@@ -24,11 +25,15 @@ test('レイヤーの行と、レイアウト定義どおりの数のキーと�
   expect(html).toContain('left:192px;top:0;width:60px;height:60px')
   // 場所と動作は、マウスを載せなくても読み上げられる名前として持つ
   expect(html).toContain('role="img" aria-label="エンコーダー 1 の左回し: マウスのホイールを上へ"')
-  expect(html).toContain('role="img" aria-label="行 0・列 1 のキー: Q"')
+  expect(html).toContain('aria-label="行 0・列 1 のキー: Q"')
+  // キーは押して選べる。エンコーダーは、まだ選べない。最初は、どのキーも選ばれていない
+  expect(count(html, '<button type="button" class="key state-')).toBe(50)
+  expect(html).not.toMatch(/class="key [^"]*"[^>]*aria-pressed="true"/)
+  expect(html).toContain('キーをクリックすると、ここで動作を変えられます。')
 })
 
 test('実機の設定: Tap Dance とレイヤー切り替えのキーを、タップを大きく、長押しを印つきで小さく出す', () => {
-  const html = renderToStaticMarkup(<KeymapView snapshot={cornix} />)
+  const html = renderToStaticMarkup(<KeymapView state={loadSnapshot(cornix)} onAction={() => {}} />)
   const figure = html.slice(html.indexOf('class="figure"'), html.indexOf('class="legend"'))
   // Tap Dance の2つ。番号は出さない
   expect(figure).toContain('aria-label="行 3・列 5 のキー: タップ: Space ／ 長押し: 左 GUI（Cmd / Win）"')
@@ -84,7 +89,7 @@ test('タップのないキーは、最初の欄を印つきで大きく出し�
 })
 
 test('キーの位置を読み取れない時は、図の代わりにその旨を出す', () => {
-  const html = renderToStaticMarkup(<KeymapView snapshot={{ ...cornix, layout: { ...cornix.layout, raw: {} } }} />)
+  const html = renderToStaticMarkup(<KeymapView state={loadSnapshot({ ...cornix, layout: { ...cornix.layout, raw: {} } })} onAction={() => {}} />)
   expect(html).toContain('キーの位置を読み取れませんでした')
   expect(html).not.toContain('class="figure"')
 })

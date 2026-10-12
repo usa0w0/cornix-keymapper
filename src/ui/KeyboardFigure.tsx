@@ -18,8 +18,19 @@ function placeOf(key: PlacedKey, box: Bounds): CSSProperties {
   }
 }
 
+interface FigureProps {
+  keys: readonly PlacedKey[]
+  viewOf: (target: KeyTarget) => KeyView
+  /** 利用者が変えた場所か。変更ありの印を出す */
+  isChanged?: (target: KeyTarget) => boolean
+  /** 選択中の場所 */
+  selected?: KeyTarget | null
+  /** キーを押した時。渡すと、キーを押せる部品にする。エンコーダーは、まだ選べない（#12） */
+  onSelect?: (target: KeyTarget) => void
+}
+
 /** キーボード図。レイアウト定義から取り出した場所に、キーとエンコーダーを並べる */
-export function KeyboardFigure({ keys, viewOf }: { keys: readonly PlacedKey[]; viewOf: (target: KeyTarget) => KeyView }) {
+export function KeyboardFigure({ keys, viewOf, isChanged, selected, onSelect }: FigureProps) {
   const box = boundsOf(keys)
   return (
     <div className="figure-scroll">
@@ -32,14 +43,32 @@ export function KeyboardFigure({ keys, viewOf }: { keys: readonly PlacedKey[]; v
         {keys.map((key) => {
           const target = targetOf(key)
           const view = viewOf(target)
+          const changed = isChanged?.(target) ?? false
           const shape = key.kind === 'encoder' ? ` encoder encoder-${key.direction}` : ''
-          const name = `${targetName(key)}: ${titleOf(view)}`
+          const name = `${targetName(key)}: ${titleOf(view)}${changed ? '（変更あり）' : ''}`
+          const className = `key state-${view.state}${shape}${changed ? ' changed' : ''}`
+          if (key.kind === 'key' && onSelect) {
+            return (
+              <button
+                type="button"
+                key={targetId(target)}
+                className={className}
+                style={placeOf(key, box)}
+                aria-pressed={selected != null && targetId(selected) === targetId(target)}
+                aria-label={name}
+                title={name}
+                onClick={() => onSelect(target)}
+              >
+                <KeyFace view={view} changed={changed} />
+              </button>
+            )
+          }
           return (
             <div
               key={targetId(target)}
-              className={`key state-${view.state}${shape}`}
+              className={className}
               style={placeOf(key, box)}
-              // 押せる部品になるまでは、場所と動作をまとめた1つの絵として読み上げさせる
+              // 押せない場所は、場所と動作をまとめた1つの絵として読み上げさせる
               role="img"
               aria-label={name}
               title={name}
@@ -47,7 +76,7 @@ export function KeyboardFigure({ keys, viewOf }: { keys: readonly PlacedKey[]; v
               {key.kind === 'encoder' && (
                 <span className="encoder-turn">{key.direction === 'left' ? '↺ 左回し' : '右回し ↻'}</span>
               )}
-              <KeyFace view={view} />
+              <KeyFace view={view} changed={changed} />
             </div>
           )
         })}
@@ -69,15 +98,16 @@ const SLOT_TAGS: Record<BehaviorSlot, string> = { tap: '', hold: '長押し', do
 
 /**
  * キーの上の表示。タップを大きく、ほかの欄を、印を付けて小さく出す。タップのないキーは、最初の欄を、印を付けて大きく出す。
- * 透過キーは、下のレイヤーで実際に効く動作を出す（薄くするのはスタイルの側）
+ * 透過キーは、下のレイヤーで実際に効く動作を出す（薄くするのはスタイルの側）。changed は、変更ありの印（右下の点）
  */
-export function KeyFace({ view }: { view: KeyView }) {
+export function KeyFace({ view, changed = false }: { view: KeyView; changed?: boolean }) {
   const slots = (view.state === 'transparent' ? view.inherited?.slots : view.slots) ?? {}
   // 「何もしない」は字を出さない
   const shown = filledSlots(slots).filter((slot) => slots[slot]!.short !== '')
   const main = shown[0]
   return (
     <>
+      {changed && <span className="mark-changed" title="変更あり" />}
       {view.state === 'locked' && (
         <span className="mark-locked" title="このサイトでは編集不可">
           🔒

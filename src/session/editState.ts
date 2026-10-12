@@ -5,6 +5,7 @@ import type { ComboEntry, KeyboardSnapshot } from '../device/types.ts'
 import type { Action } from '../model/action.ts'
 import type { KeyBehavior } from '../model/behavior.ts'
 import { decodeKey } from '../model/decode.ts'
+import { applyEdits as encodeEdits, planKeyEdits, type KeyEditPlan } from '../model/encode.ts'
 import {
   EMPTY_EDITS,
   isEmptyEdits,
@@ -87,9 +88,15 @@ function prune(source: KeyboardSnapshot, edits: Edits): Edits {
     const current = comboAt(source, ref.slot, custom)
     return current !== undefined && !sameValue(combo, current)
   })
+  // 使われていない枠を上書きしてよい、という利用者の答えは、キーの編集がある間だけ持つ
+  const overwrite = edits.overwriteUnusedTapDances === true && keys.length > 0
   const unchanged =
-    keys.length === edits.keys.length && encoders.length === edits.encoders.length && combos.length === edits.combos.length
-  return unchanged ? edits : { keys, encoders, combos }
+    keys.length === edits.keys.length &&
+    encoders.length === edits.encoders.length &&
+    combos.length === edits.combos.length &&
+    overwrite === (edits.overwriteUnusedTapDances === true)
+  if (unchanged) return edits
+  return overwrite ? { keys, encoders, combos, overwriteUnusedTapDances: true } : { keys, encoders, combos }
 }
 
 /** 編集を入れ替える。中身が変わらなければ、同じ状態を返す（画面を描き直さない） */
@@ -98,11 +105,55 @@ const withEdits = (state: EditState, edits: Edits): EditState => {
   return sameValue(pruned, state.edits) ? state : { ...state, edits: pruned }
 }
 
-/** キーの動作を変える。同じキーの前の編集は置き換える。出発点と同じ内容なら、編集はなくなる */
-export function editKey(state: EditState, layer: number, key: number, behavior: KeyBehavior): EditState {
+/**
+ * キーの動作を変える。同じキーの前の編集は置き換える。出発点と同じ内容なら、編集はなくなる。
+ * overwriteUnused は、Tap Dance の枠が足りない時に、中身はあるがどこからも使われていない枠を上書きして使ってよいか
+ * （利用者が認めた時だけ true。1回認めたら、キーの編集がなくなるまで続く）
+ */
+export function editKey(
+  state: EditState,
+  layer: number,
+  key: number,
+  behavior: KeyBehavior,
+  overwriteUnused = false,
+): EditState {
   const others = state.edits.keys.filter((edit) => edit.layer !== layer || edit.key !== key)
-  return withEdits(state, { ...state.edits, keys: [...others, { layer, key, behavior }] })
+  const keys = [...others, { layer, key, behavior }]
+  return withEdits(state, overwriteUnused ? { ...state.edits, keys, overwriteUnusedTapDances: true } : { ...state.edits, keys })
 }
+
+/** キーの編集を出発点に当てはめた結果（キーコードと Tap Dance の枠の割り当て、残り枠数、足りない枠の数） */
+export const planKeys = (state: EditState): KeyEditPlan => planKeyEdits(state.source, state.edits)
+
+/** キーの編集を受け付けたか。止めた時は、その編集を当てはめた場合の結果（blocked）を返す。状態は変えていない */
+export interface KeyEditResult {
+  state: EditState
+  blocked: KeyEditPlan | null
+}
+
+/**
+ * 編集した後の状態（next）で目標を作れるかを計算し、次の編集は、状態に反映せずに止める。
+ * - Tap Dance の枠が足りなくなる編集（足りない枠の数が、いまより増えない編集は通す。
+ *   読み直した内容に編集を当て直した後など、すでに足りない時に、枠を減らす編集を止めないため）
+ * - 本体の設定に直せない動作
+ */
+function guard(state: EditState, next: EditState): KeyEditResult {
+  if (next === state) return { state, blocked: null }
+  const plan = planKeys(next)
+  const before = planKeys(state)
+  const worse = plan.missing > before.missing || plan.invalid.length > before.invalid.length
+  return worse ? { state, blocked: plan } : { state: next, blocked: null }
+}
+
+/** キーの動作を変える。Tap Dance の枠が足りなくなる編集は、状態に反映せずに止める */
+export const tryEditKey = (state: EditState, layer: number, key: number, behavior: KeyBehavior, overwriteUnused = false) =>
+  guard(state, editKey(state, layer, key, behavior, overwriteUnused))
+
+/**
+ * その場所の編集を取り消す。取り消すと Tap Dance の枠が足りなくなる時は、止める
+ * （枠を空けた編集を、空いた枠をほかのキーが使った後で取り消す場合）
+ */
+export const tryRevertEdit = (state: EditState, place: EditPlace) => guard(state, revertEdit(state, place))
 
 /** エンコーダーの1方向の動作を変える */
 export function editEncoder(
@@ -184,20 +235,16 @@ export function reapplyEdits(state: EditState, fresh: KeyboardSnapshot): EditSta
 /**
  * 編集を本体の表現に直して、目標（出発点の写し）に書き込む関数。
  * キーの動作からキーコードへの変換と Tap Dance の枠の割り当て、エンコーダー、コンボの枠の割り当てを受け持つ。
- * model/encode.ts に作って、ここへ渡す（キーは #10、エンコーダーは #12、コンボは #13）
+ * 中身は model/encode.ts にある（キーは作ってある。エンコーダーは #12、コンボは #13 で足す）
  */
 export type ApplyEdits = (target: KeyboardSnapshot, edits: Edits) => void
-
-const applyEditsNotReady: ApplyEdits = () => {
-  throw new Error('編集を本体の設定に直す処理（model/encode.ts）は、まだない')
-}
 
 /**
  * 書き込む目標（出発点に、編集を当てはめたスナップショット）を作る。
  * 編集していないキー、エンコーダー、コンボ、Tap Dance の枠は、出発点の値をそのまま使う（キーの動作への変換を通さない）。
- * 編集がなければ、applyEdits は呼ばない
+ * 編集がなければ、applyEdits は呼ばない。目標を作れない編集（Tap Dance の枠が足りない、など）があれば、失敗する
  */
-export function buildTarget(state: EditState, applyEdits: ApplyEdits = applyEditsNotReady): KeyboardSnapshot {
+export function buildTarget(state: EditState, applyEdits: ApplyEdits = encodeEdits): KeyboardSnapshot {
   const target = structuredClone(state.source)
   if (!isEmptyEdits(state.edits)) applyEdits(target, state.edits)
   return target
@@ -233,10 +280,12 @@ export type SessionAction =
   /** 本体の読み出しが終わった（最初の読み出し、つなぎ直した後の読み直し） */
   | { type: 'read'; snapshot: KeyboardSnapshot }
   | { type: 'resolve'; choice: ReloadChoice }
-  | { type: 'editKey'; layer: number; key: number; behavior: KeyBehavior }
+  /** キーの動作を変える。Tap Dance の枠が足りなくなる編集は、反映しない（tryEditKey） */
+  | { type: 'editKey'; layer: number; key: number; behavior: KeyBehavior; overwriteUnused?: boolean }
   | { type: 'editEncoder'; layer: number; encoder: number; direction: 'left' | 'right'; action: Action }
   | { type: 'addCombo'; combo: ComboContent }
   | { type: 'editCombo'; ref: ComboRef; combo: ComboContent | null }
+  /** その場所の編集を取り消す。取り消すと Tap Dance の枠が足りなくなる時は、反映しない（tryRevertEdit） */
   | { type: 'revert'; place: EditPlace }
   | { type: 'replaceSource'; source: KeyboardSnapshot }
   | { type: 'revertSource' }
@@ -275,7 +324,7 @@ function resolve(session: EditSession, choice: ReloadChoice): EditSession {
 function applyToEdit(edit: EditState, action: Exclude<SessionAction, { type: 'read' | 'resolve' }>): EditState {
   switch (action.type) {
     case 'editKey':
-      return editKey(edit, action.layer, action.key, action.behavior)
+      return tryEditKey(edit, action.layer, action.key, action.behavior, action.overwriteUnused).state
     case 'editEncoder':
       return editEncoder(edit, action.layer, action.encoder, action.direction, action.action)
     case 'addCombo':
@@ -283,7 +332,7 @@ function applyToEdit(edit: EditState, action: Exclude<SessionAction, { type: 're
     case 'editCombo':
       return editCombo(edit, action.ref, action.combo)
     case 'revert':
-      return revertEdit(edit, action.place)
+      return tryRevertEdit(edit, action.place).state
     case 'replaceSource':
       return replaceSource(edit, action.source)
     case 'revertSource':

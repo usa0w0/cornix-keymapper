@@ -7,11 +7,11 @@ import { KC_TRANSPARENT, keycodeToAction, modsFromBits, type CustomKeycode } fro
 
 const KC_NO = 0x0000
 /** MT（タップでキー、長押しで修飾キー）。下位 8 ビットがキー、その上の 5 ビットが修飾 */
-const MOD_TAP = { from: 0x2000, to: 0x3fff }
+export const MOD_TAP = { from: 0x2000, to: 0x3fff }
 /** LT（タップでキー、長押しでレイヤー）。下位 8 ビットがキー、その上の 4 ビットがレイヤー（0〜15） */
-const LAYER_TAP = { from: 0x4000, to: 0x4fff }
+export const LAYER_TAP = { from: 0x4000, to: 0x4fff }
 /** Tap Dance。先頭の番号 + 枠の番号 */
-const TAP_DANCE = { from: 0x5700, count: 256 }
+export const TAP_DANCE = { from: 0x5700, count: 256 }
 
 /** Tap Dance のキーコードが指す枠の番号。Tap Dance でなければ undefined */
 export function tapDanceIndexOf(keycode: number): number | undefined {

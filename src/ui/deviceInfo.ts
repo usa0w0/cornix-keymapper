@@ -1,8 +1,9 @@
 // 本体の情報（対応機能と枠数）を、ヘッダーと「接続中のキーボード」のダイアログに出す形にまとめる
 import type { KeyboardSnapshot } from '../device/types.ts'
 import { layerModeName, layerModesFor } from '../model/action.ts'
-import { tapDanceIndexOf } from '../model/decode.ts'
+import { countFreeTapDances } from '../model/encode.ts'
 import { firmwareVersionOf } from '../model/layout.ts'
+import { planKeys, type EditState } from '../session/editState.ts'
 
 export interface SlotCount {
   /** 本体の枠数 */
@@ -17,20 +18,20 @@ export interface SlotCount {
  * （docs/design.md「枠の割り当て」）。コンボの空いている枠は、キーも出力も入っていない枠
  */
 export function slotCounts(snapshot: KeyboardSnapshot): { tapDance: SlotCount; combo: SlotCount } {
-  const pointed = new Set<number>()
-  const keycodes = [...snapshot.keymap.flat(), ...snapshot.encoders.flat(2), ...snapshot.combos.map((combo) => combo.output)]
-  for (const keycode of keycodes) {
-    const index = tapDanceIndexOf(keycode)
-    if (index !== undefined) pointed.add(index)
-  }
-  const freeTapDances = snapshot.tapDances.filter(
-    (entry, index) => !entry.onTap && !entry.onHold && !entry.onDoubleTap && !entry.onTapHold && !pointed.has(index),
-  )
   const freeCombos = snapshot.combos.filter((combo) => !combo.output && combo.keys.every((key) => !key))
   return {
-    tapDance: { total: snapshot.tapDances.length, free: freeTapDances.length },
+    tapDance: { total: snapshot.tapDances.length, free: countFreeTapDances(snapshot) },
     combo: { total: snapshot.combos.length, free: freeCombos.length },
   }
+}
+
+/**
+ * ヘッダーに出す残り枠数。Tap Dance は、編集を当てはめた後の、枠の割り当ての計算から出す（編集に合わせて増減する）。
+ * コンボは、まだ編集できないので、出発点の数（#13）
+ */
+export function editSlotCounts(state: EditState): { tapDance: SlotCount; combo: SlotCount } {
+  const counts = slotCounts(state.source)
+  return { ...counts, tapDance: { total: counts.tapDance.total, free: planKeys(state).free } }
 }
 
 export interface InfoRow {

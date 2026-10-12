@@ -23,7 +23,10 @@ import {
   revertEdit,
   revertSource,
   sameSnapshot,
+  planKeys,
   sessionReducer,
+  tryEditKey,
+  tryRevertEdit,
   type EditSession,
   type SessionAction,
 } from './editState.ts'
@@ -85,8 +88,8 @@ test('目標を作る時、編集は、出発点の写しと一緒に、本体�
   expect(seen).toEqual([{ keys: [{ layer: 0, key: 1, behavior: TAP_A_HOLD_CTRL }], encoders: [], combos: [] }])
   expect(target).toEqual(altered((s) => (s.keymap[0][1] = 0x2104)))
   expect(state.source).toEqual(cornixSnapshot())
-  // 編集を本体の設定に直す処理は、まだない（#10）。編集があるのに渡さなければ、黙って出発点を返さずに止める
-  expect(() => buildTarget(state)).toThrow('まだない')
+  // 渡さなければ、model/encode.ts の処理を使う（タップ: A ／ 長押し: 左 Ctrl は MT）
+  expect(buildTarget(state)).toEqual(altered((s) => (s.keymap[0][1] = 0x2104)))
 })
 
 test('キーの編集を足す: 利用者が変えたキーだけを持つ。同じキーをもう一度変えると、置き換える', () => {
@@ -393,4 +396,130 @@ test('偽の機器: 切断してつなぎ直しても編集が残る。本体が
   keyboard.snapshot.uid = 'ほかの機器'
   await readFrom()
   expect(session.pending?.reason).toBe('other-device')
+})
+
+// ---- Tap Dance の枠の割り当てと、枠が足りない編集 ----
+
+const ESC: Action = { kind: 'key', code: 0x29, mods: [] }
+const A_ESC: KeyBehavior = { tap: A, doubleTap: ESC }
+const B_ESC: KeyBehavior = { tap: B, doubleTap: ESC }
+
+/** 空いている枠がない設定。枠 2〜31 に別々の中身を入れ、レイヤー 9 のキーから1つずつ指す */
+const full = (alter: (snapshot: KeyboardSnapshot) => void = () => {}) =>
+  altered((s) => {
+    for (let slot = 2; slot < 32; slot++) {
+      s.tapDances[slot] = { onTap: 0x04 + slot, onHold: 0, onDoubleTap: 0x2c, onTapHold: 0, tappingTerm: 250 }
+      s.keymap[9][slot] = 0x5700 + slot
+    }
+    alter(s)
+  })
+
+test('実機の設定: 欄の増減で機能が切り替わり、残り枠数が増減する。目標は、編集したキーと、その枠だけが変わる', () => {
+  let state = loadSnapshot(cornixSnapshot())
+  expect(planKeys(state).free).toBe(30)
+  // タップだけのキーに、長押しを足す（MT）。枠は使わない
+  state = editKey(state, 0, 1, TAP_A_HOLD_CTRL)
+  expect(planKeys(state).free).toBe(30)
+  // 2回タップを足す（Tap Dance）。枠を1つ使う
+  state = editKey(state, 0, 1, { ...TAP_A_HOLD_CTRL, doubleTap: ESC })
+  expect(planKeys(state).free).toBe(29)
+  expect(buildTarget(state)).toEqual(
+    altered((s) => {
+      s.keymap[0][1] = 0x5702
+      s.tapDances[2] = { onTap: 0x04, onHold: 0xe0, onDoubleTap: 0x29, onTapHold: 0, tappingTerm: 250 }
+    }),
+  )
+  // 2回タップを消すと、枠が戻る
+  state = editKey(state, 0, 1, TAP_A_HOLD_CTRL)
+  expect(planKeys(state).free).toBe(30)
+  expect(buildTarget(state)).toEqual(altered((s) => (s.keymap[0][1] = 0x2104)))
+  // Tap Dance のキー（枠 1 を1つだけで使っている）の長押しを消すと、通常のキーになり、枠が空く
+  state = editKey(state, 0, 54, { tap: B })
+  expect(planKeys(state).free).toBe(31)
+  expect(buildTarget(state).tapDances[1]).toEqual({ onTap: 0, onHold: 0, onDoubleTap: 0, onTapHold: 0, tappingTerm: 250 })
+  // 取り消すと、元に戻る
+  state = revertEdit(revertEdit(state, { kind: 'key', layer: 0, key: 54 }), { kind: 'key', layer: 0, key: 1 })
+  expect(buildTarget(state)).toEqual(cornixSnapshot())
+})
+
+test('読んだ時のままのキーに、同じ内容を入れ直しても、編集にならない（Tap Dance のキーも、MT に変わらない）', () => {
+  const state = loadSnapshot(cornixSnapshot())
+  // レイヤー 0 のキー 26 は、Tap Dance の枠 0（タップ: Space ／ 長押し: 左 GUI）。MT でも書ける内容
+  const same = behaviorAt(state.source, 0, 26)
+  const result = tryEditKey(state, 0, 26, same)
+  expect(result).toEqual({ state, blocked: null })
+  expect(result.state).toBe(state)
+  expect(buildTarget(result.state).keymap[0][26]).toBe(0x5700)
+})
+
+test('枠が足りなくなる編集は、状態に反映せずに止め、当てはめた場合の結果を返す', () => {
+  const state = loadSnapshot(full())
+  const result = tryEditKey(state, 0, 1, A_ESC)
+  expect(result.state).toBe(state)
+  expect(result.blocked).toMatchObject({ missing: 1, overwritable: 0 })
+  expect(result.blocked!.unplaced).toEqual([{ layer: 0, key: 1, behavior: A_ESC }])
+  // 画面から送られても、反映しない
+  const session = run([{ type: 'read', snapshot: full() }, { type: 'editKey', layer: 0, key: 1, behavior: A_ESC }])
+  expect(session.edit!.edits).toEqual(EMPTY_EDITS)
+  // 枠を使わない編集と、枠を空ける編集は通る。空いた枠は、次の編集で使える
+  const freed = tryEditKey(state, 0, 54, { tap: B })
+  expect(freed.blocked).toBeNull()
+  const reused = tryEditKey(freed.state, 0, 1, A_ESC)
+  expect(reused.blocked).toBeNull()
+  expect(buildTarget(reused.state).keymap[0][1]).toBe(0x5701)
+  // もう1つ枠が要る編集は、止まる
+  expect(tryEditKey(reused.state, 0, 2, B_ESC).blocked).toMatchObject({ missing: 1 })
+  // 空いた枠をほかのキーが使った後で、枠を空けた編集を取り消すと、足りなくなるので、止まる
+  const place = { kind: 'key', layer: 0, key: 54 } as const
+  const reverted = tryRevertEdit(reused.state, place)
+  expect(reverted.state).toBe(reused.state)
+  expect(reverted.blocked).toMatchObject({ missing: 1 })
+  const held = { edit: reused.state, pending: null }
+  expect(sessionReducer(held, { type: 'revert', place })).toBe(held)
+  // 枠を使っているほうを先に取り消せば、取り消せる
+  const first = tryRevertEdit(reused.state, { kind: 'key', layer: 0, key: 1 })
+  expect(first.blocked).toBeNull()
+  expect(tryRevertEdit(first.state, place)).toMatchObject({ blocked: null, state: { edits: EMPTY_EDITS } })
+})
+
+test('中身はあるが使われていない枠は、利用者が認めた時だけ上書きして使う。認めたことは、キーの編集がある間だけ持つ', () => {
+  const state = loadSnapshot(full((s) => (s.keymap[9][31] = 0)))
+  const blocked = tryEditKey(state, 0, 1, A_ESC)
+  expect(blocked.blocked).toMatchObject({ missing: 1, overwritable: 1 })
+  const allowed = tryEditKey(state, 0, 1, A_ESC, true)
+  expect(allowed.blocked).toBeNull()
+  expect(allowed.state.edits.overwriteUnusedTapDances).toBe(true)
+  expect(buildTarget(allowed.state).keymap[0][1]).toBe(0x571f)
+  expect(buildTarget(allowed.state).tapDances[31]).toEqual({ onTap: 0x04, onHold: 0, onDoubleTap: 0x29, onTapHold: 0, tappingTerm: 250 })
+  // ほかの編集を足しても、認めたことは残る
+  const more = editKey(allowed.state, 0, 2, { tap: A })
+  expect(more.edits.overwriteUnusedTapDances).toBe(true)
+  expect(countEdits(more)).toBe(2)
+  // キーの編集がなくなったら、なくなる。編集のない状態に戻る
+  const reverted = revertEdit(revertEdit(more, { kind: 'key', layer: 0, key: 1 }), { kind: 'key', layer: 0, key: 2 })
+  expect(reverted.edits).toEqual(EMPTY_EDITS)
+  expect(hasUnwrittenChanges(reverted)).toBe(false)
+  // 画面からは、編集と一緒に送る
+  const session = run([
+    { type: 'read', snapshot: state.source },
+    { type: 'editKey', layer: 0, key: 1, behavior: A_ESC, overwriteUnused: true },
+  ])
+  expect(session.edit!.edits).toEqual({ keys: [{ layer: 0, key: 1, behavior: A_ESC }], encoders: [], combos: [], overwriteUnusedTapDances: true })
+})
+
+test('読み直した内容に編集を当て直して、枠が足りなくなった時: 枠を増やす編集は止め、減らす編集は通す', () => {
+  // 編集した後で、ほかから本体の枠がすべて埋められた
+  const edited = editKey(editKey(loadSnapshot(cornixSnapshot()), 0, 1, A_ESC), 0, 2, B_ESC)
+  const state = reapplyEdits(edited, full())
+  expect(planKeys(state)).toMatchObject({ missing: 2, free: 0 })
+  expect(() => buildTarget(state)).toThrow('足りない')
+  // 枠が要るキーを、さらに足すことはできない
+  expect(tryEditKey(state, 0, 3, { tap: B, tapHold: ESC }).blocked).toMatchObject({ missing: 3 })
+  // 足りない数が増えない編集は通る
+  const fewer = tryEditKey(state, 0, 2, { tap: B })
+  expect(fewer.blocked).toBeNull()
+  expect(planKeys(fewer.state).missing).toBe(1)
+  const none = revertEdit(fewer.state, { kind: 'key', layer: 0, key: 1 })
+  expect(planKeys(none).missing).toBe(0)
+  expect(buildTarget(none).keymap[0][2]).toBe(0x0005)
 })
