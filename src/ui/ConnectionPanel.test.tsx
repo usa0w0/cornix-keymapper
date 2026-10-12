@@ -12,6 +12,9 @@ const device: KeyboardDevice = {
   protocol: 'VIA プロトコル 9',
   onDisconnect: () => () => {},
   disconnect: async () => {},
+  read: () => Promise.reject(new Error('使わない')),
+  exchangeCount: () => 0,
+  exchanges: () => [],
 }
 
 test('未接続では「接続」ボタンを出す', () => {

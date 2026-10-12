@@ -17,6 +17,8 @@ export interface TransportOptions {
   timeoutMs?: number
   /** 応答がない時に送り直す回数 */
   retries?: number
+  /** 診断用。要求を1回送るたびに、応答（タイムアウトなら null）と、かかった時間を知らせる */
+  onExchange?: (request: Uint8Array, response: Uint8Array | null, ms: number) => void
 }
 
 interface Pending {
@@ -30,6 +32,7 @@ export class Transport {
   private readonly reportId: number
   private readonly timeoutMs: number
   private readonly retries: number
+  private readonly onExchange: TransportOptions['onExchange']
   private queue: Promise<unknown> = Promise.resolve()
   private pending: Pending | null = null
   // タイムアウトした要求への応答が、まだ届きうる数。応答には要求と結び付ける印がないので、
@@ -43,6 +46,7 @@ export class Transport {
     this.reportId = options.reportId ?? 0
     this.timeoutMs = options.timeoutMs ?? 1000
     this.retries = options.retries ?? 1
+    this.onExchange = options.onExchange
     this.device.addEventListener('inputreport', this.handleInputReport)
   }
 
@@ -72,7 +76,9 @@ export class Transport {
 
     await this.drainLateResponses()
     for (let attempt = 0; attempt <= this.retries; attempt++) {
+      const startedAt = performance.now()
       const response = await this.sendAndWait(report)
+      this.onExchange?.(report, response, performance.now() - startedAt)
       if (response) return response
       this.lateResponses++
     }

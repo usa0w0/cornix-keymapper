@@ -29,15 +29,22 @@ export function useConnection(connector: DeviceConnector) {
   // ケーブルを抜く、Bluetooth が切れる、などで機器がなくなった時
   useEffect(() => {
     if (!device) return
+    const connectedAt = Date.now()
     return device.onDisconnect(() => {
       setState({
         status: 'disconnected',
-        notice: 'キーボードとの接続が切れました。つなぎ直してから「接続」を押してください。',
+        notice: `キーボードとの接続が切れました。つなぎ直してから「接続」を押してください。（接続していた時間: ${formatDuration(Date.now() - connectedAt)}）`,
       })
     })
   }, [device])
 
   return { state, open, close }
+}
+
+/** ミリ秒を「3 分 5 秒」の形にする */
+export function formatDuration(ms: number): string {
+  const seconds = Math.round(ms / 1000)
+  return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
 }
 
 export function describeError(error: unknown): string {
