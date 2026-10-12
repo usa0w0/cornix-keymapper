@@ -161,10 +161,15 @@
   font-weight: 600;
 }
 
-.proto .layers-hint {
+.proto .layers button.help {
+  min-width: 0;
+  width: 1.6rem;
+  height: 1.6rem;
   margin-left: 0.6rem;
+  padding: 0;
+  border-radius: 50%;
   color: var(--muted);
-  font-size: 0.8rem;
+  font-weight: 600;
 }
 
 .proto .figure-scroll {
@@ -302,6 +307,29 @@
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface);
+}
+
+.proto .legend {
+  margin: auto;
+  max-width: min(44rem, 90vw);
+  color: var(--text);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.25);
+}
+
+.proto .legend::backdrop {
+  background: rgb(0 0 0 / 0.25);
+}
+
+.proto .legend-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.proto .legend-note {
+  margin: 0.8rem 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 .proto .edit h2,

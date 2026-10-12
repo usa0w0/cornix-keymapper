@@ -70,7 +70,9 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
                 {index}
               </button>
             ))}
-            <span className="layers-hint">薄い番号は、キーが1つも割り当てられていないレイヤー</span>
+            <button type="button" className="help" popoverTarget="proto-legend" aria-label="キーの見え方">
+              ?
+            </button>
           </div>
 
           <KeyboardFigure snapshot={snapshot} layer={layer} selection={selection} onSelect={setSelection} />
@@ -273,8 +275,13 @@ function Legend() {
     { name: '選択中', view: sample({ tap: a }), selected: true },
   ]
   return (
-    <section className="legend" aria-label="キーの見え方">
-      <h2>キーの見え方</h2>
+    <section className="legend" id="proto-legend" popover="auto" aria-label="キーの見え方">
+      <div className="legend-head">
+        <h2>キーの見え方</h2>
+        <button type="button" className="quiet" popoverTarget="proto-legend" popoverTargetAction="hide" aria-label="閉じる">
+          ×
+        </button>
+      </div>
       <ul>
         {samples.map(({ name, view, changed, selected }) => (
           <li key={name}>
@@ -285,6 +292,7 @@ function Legend() {
           </li>
         ))}
       </ul>
+      <p className="legend-note">レイヤーの番号が薄いものは、キーが1つも割り当てられていないレイヤーです。</p>
     </section>
   )
 }
