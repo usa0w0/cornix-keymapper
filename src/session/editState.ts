@@ -348,14 +348,28 @@ export function comboList(state: EditState, plan: KeyEditPlan = planKeys(state))
   return [...existing, ...added]
 }
 
+/** そのキーと、コンボの関わり */
+export interface KeyComboUse {
+  /** そのキーのいまの中身を、同時に押すキーに使っているコンボの数 */
+  used: number
+  /** そのキーの動作を変えたために、そのキーでは働かなくなっているコンボの数 */
+  broken: number
+}
+
 /**
- * そのキーを、同時に押すキーに使っているコンボの数（編集を当てはめた後の内容で見る）。
- * コンボは位置ではなくキーの中身で決まるので、そのキーのいまのキーコードを、同時に押すキーに持つコンボを数える
+ * そのキーを、同時に押すキーに使っているコンボの数と、動作を変えたために、そのキーでは働かなくなっているコンボの数。
+ * コンボは位置ではなくキーの中身で決まるので、キーコードで数える（コンボは、編集を当てはめた後の内容）。
+ * - used: 編集を当てはめた後のキーコードを持つコンボ。動作を変えていないキーでは、出発点の中身を持つコンボ
+ * - broken: 変える前の中身（出発点のキーコード）を持つコンボのうち、変えた後のキーコードは持たないもの。
+ *   変えた後の中身でも当たり続けるコンボは、入れない。動作を変えていないキーでは 0
  */
-export function combosUsingKey(state: EditState, place: KeyPlace, plan: KeyEditPlan = planKeys(state)): number {
-  const keycode = plan.keymap[place.layer]?.[place.key]
-  if (!keycode) return 0
-  return plan.combos.filter((combo) => combo.keys.includes(keycode)).length
+export function combosOfKey(state: EditState, place: KeyPlace, plan: KeyEditPlan = planKeys(state)): KeyComboUse {
+  const before = state.source.keymap[place.layer]?.[place.key]
+  const now = plan.keymap[place.layer]?.[place.key]
+  const has = (keycode: number | undefined) => (combo: { keys: readonly number[] }) => !!keycode && combo.keys.includes(keycode)
+  const used = plan.combos.filter(has(now))
+  const broken = before === now ? [] : plan.combos.filter(has(before)).filter((combo) => !used.includes(combo))
+  return { used: used.length, broken: broken.length }
 }
 
 /** その場所の編集を取り消す（出発点の内容に戻る）。連動して変えたキーは、同じ組のキーをまとめて取り消す */

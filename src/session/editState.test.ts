@@ -11,7 +11,7 @@ import {
   buildTarget,
   comboKeyAt,
   comboList,
-  combosUsingKey,
+  combosOfKey,
   countEdits,
   editCombo,
   editEncoder,
@@ -299,7 +299,7 @@ test('出力が Tap Dance のコンボを消すと枠が空く。空いた枠を
   expect(reverted.blocked).toMatchObject({ missing: 1 })
 })
 
-test('そのキーを使っているコンボの数は、位置ではなく、いまのキーコードで数える', () => {
+test('そのキーを使っているコンボの数は、位置ではなく、キーコードで数える。動作を変えた後は、働かなくなったコンボの数を出す', () => {
   // B は、レイヤー 0 に2つある（キー 19 と 41）
   const source = altered((s) => {
     s.combos[0] = { keys: [0x05, Q, 0, 0], output: 0x29 }
@@ -307,19 +307,37 @@ test('そのキーを使っているコンボの数は、位置ではなく、�
     s.combos[2] = { keys: [0x5700, Q, 0, 0], output: 0x2a }
   })
   let state = loadSnapshot(source)
-  expect(combosUsingKey(state, { layer: 0, key: 19 })).toBe(2)
-  expect(combosUsingKey(state, { layer: 0, key: 41 })).toBe(2)
-  expect(combosUsingKey(state, { layer: 0, key: 1 })).toBe(2)
-  expect(combosUsingKey(state, { layer: 0, key: 26 })).toBe(1)
+  expect(combosOfKey(state, { layer: 0, key: 19 })).toEqual({ used: 2, broken: 0 })
+  expect(combosOfKey(state, { layer: 0, key: 41 })).toEqual({ used: 2, broken: 0 })
+  expect(combosOfKey(state, { layer: 0, key: 1 })).toEqual({ used: 2, broken: 0 })
+  expect(combosOfKey(state, { layer: 0, key: 26 })).toEqual({ used: 1, broken: 0 })
   // 空のキーと、コンボにないキー
-  expect(combosUsingKey(state, { layer: 0, key: 6 })).toBe(0)
-  expect(combosUsingKey(state, { layer: 0, key: 4 })).toBe(0)
-  // キーの動作を変えると、そのキーは、コンボから外れる。コンボを消すと、数が減る
+  expect(combosOfKey(state, { layer: 0, key: 6 })).toEqual({ used: 0, broken: 0 })
+  expect(combosOfKey(state, { layer: 0, key: 4 })).toEqual({ used: 0, broken: 0 })
+  expect(combosOfKey(state, { layer: 0, key: 999 })).toEqual({ used: 0, broken: 0 })
+  // キーの動作を変えると、変える前の中身を使っていたコンボが、そのキーでは働かなくなる。同じ中身のほかのキーは、そのまま
   state = editKey(state, 0, 19, { tap: A })
-  expect(combosUsingKey(state, { layer: 0, key: 19 })).toBe(0)
-  expect(combosUsingKey(state, { layer: 0, key: 41 })).toBe(2)
+  expect(combosOfKey(state, { layer: 0, key: 19 })).toEqual({ used: 0, broken: 2 })
+  expect(combosOfKey(state, { layer: 0, key: 41 })).toEqual({ used: 2, broken: 0 })
+  // 変えた後の中身でも当たり続けるコンボは、働かなくなる数に入れない（Q に変えると、B と Q のコンボには当たる）
+  state = editKey(state, 0, 19, { tap: { kind: 'key', code: Q, mods: [] } })
+  expect(combosOfKey(state, { layer: 0, key: 19 })).toEqual({ used: 2, broken: 1 })
+  // 働かなくなったコンボを消すと、数が減る。変更を取り消すと、元に戻る
   state = editCombo(state, { slot: 1 }, null)
-  expect(combosUsingKey(state, { layer: 0, key: 41 })).toBe(1)
+  expect(combosOfKey(state, { layer: 0, key: 19 })).toEqual({ used: 2, broken: 0 })
+  expect(combosOfKey(revertEdit(state, { kind: 'key', layer: 0, key: 19 }), { layer: 0, key: 19 })).toEqual({ used: 1, broken: 0 })
+})
+
+test('Tap Dance のキーの動作を変えた時も、変える前のキーコードを使っていたコンボを、働かなくなった数に入れる', () => {
+  // キー 26 は枠 0 を指す。レイヤー 1 と 2 にも、同じ枠を指すキーがある
+  const source = altered((s) => (s.combos[0] = { keys: [0x5700, Q, 0, 0], output: 0x29 }))
+  let state = loadSnapshot(source)
+  state = editKey(state, 0, 26, { tap: A, doubleTap: ESC })
+  expect(combosOfKey(state, { layer: 0, key: 26 })).toEqual({ used: 0, broken: 1 })
+  expect(combosOfKey(state, { layer: 1, key: 26 })).toEqual({ used: 1, broken: 0 })
+  // 変えた後のキーを、コンボのキーにすると、そのコンボには使われている
+  state = addCombo(state, { keys: [W, comboKeyAt(state, { layer: 0, key: 26 })!], output: B })
+  expect(combosOfKey(state, { layer: 0, key: 26 })).toEqual({ used: 1, broken: 1 })
 })
 
 test('編集を取り消す: その場所の編集だけがなくなる', () => {

@@ -5,7 +5,7 @@ import { linkedKeys, type EditPlace, type KeyPlace } from '../model/edits.ts'
 import { customKeycodesOf } from '../model/keycodes.ts'
 import { placeKeys } from '../model/layout.ts'
 import {
-  combosUsingKey,
+  combosOfKey,
   planKeys,
   tryEditEncoder,
   tryEditKey,
@@ -172,7 +172,7 @@ export function KeymapView({ state, onAction, shown }: Props) {
           view={viewOf(selected)}
           changed={isChanged(edits, layer, selected)}
           linked={selected.kind === 'key' ? linkedKeys(edits.keys, { layer, key: selected.index }).length : 1}
-          usedByCombos={selected.kind === 'key' ? combosUsingKey(state, { layer, key: selected.index }, plan) : 0}
+          combos={selected.kind === 'key' ? combosOfKey(state, { layer, key: selected.index }, plan) : undefined}
           legend={legend}
           layerCount={snapshot.keymap.length}
           layerModes={layerModesFor(snapshot.capabilities.vialProtocol).modes}
