@@ -50,7 +50,7 @@ export interface Backup {
 /** 一覧の1件。読み込めないものも、削除できるように返す */
 export type BackupItem =
   | ({ readable: true } & Backup)
-  /** savedAt は、日時だけでも読めた時に入る */
+  // savedAt は、日時だけでも読めた時に入る
   | { readable: false; id: string; savedAt: string | null; reason: UnreadableReason }
 
 /** 「書き込み中」の印。書き込みの途中でページを閉じた時などに残る */
@@ -66,7 +66,7 @@ export interface PendingWrite {
 export type PendingWriteState =
   | { status: 'none' }
   | ({ status: 'pending' } & PendingWrite)
-  /** 印はあるが読み込めない。startedAt は、日時だけでも読めた時に入る */
+  // 印はあるが読み込めない。startedAt は、日時だけでも読めた時に入る
   | { status: 'unreadable'; startedAt: string | null; reason: UnreadableReason }
 
 export type StorageResult = { ok: true } | { ok: false; reason: StorageFailure }
