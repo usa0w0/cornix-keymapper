@@ -2,9 +2,10 @@ import { expect, test } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createElement } from 'react'
 import { DeviceError, type WriteOperation } from '../types.ts'
-import { ReadResult } from '../../ui/ReadPanel.tsx'
+import { ReadResult } from '../../ui/Diagnostics.tsx'
 import { buildReadReport } from '../../ui/readReport.ts'
 import { cornixSnapshot, createFakeCornix } from './cornix.ts'
+import { failuresFromQuery } from './fakeDevice.ts'
 
 const operations: WriteOperation[] = [
   { type: 'setKey', layer: 0, key: 1, keycode: 0x0004 },
@@ -139,6 +140,38 @@ test('読み直しで、指定した回だけ違う値を返す。本体の中�
   expect(await device.read()).toEqual(cornixSnapshot())
 })
 
+test('指定した回の読み出しだけ、途中で失敗する。どこを読んでいたかを添え、次の読み出しは通る', async () => {
+  const keyboard = createFakeCornix({ failures: { failReadAt: { read: 1 } } })
+  const device = await keyboard.connect()
+  const steps: string[] = []
+
+  const error = await failure(device.read((progress) => steps.push(progress.step)))
+  expect(error).toBeInstanceOf(DeviceError)
+  expect(error).toMatchObject({ kind: 'timeout', step: 'キーマップ' })
+  // 失敗した所より後は読まない
+  expect(steps).toEqual(['レイアウト定義', 'キーマップ'])
+  expect(await device.read()).toEqual(cornixSnapshot())
+})
+
+test('読み出しの失敗は、読んでいた所と種類を指定できる', async () => {
+  const keyboard = createFakeCornix({
+    failures: { failReadAt: { read: 2, step: 'Tap Dance', kind: 'unexpected-response' } },
+  })
+  const device = await keyboard.connect()
+  expect(await device.read()).toEqual(cornixSnapshot())
+  expect(await failure(device.read())).toMatchObject({ kind: 'unexpected-response', step: 'Tap Dance' })
+})
+
+test('URL の指定から、読み出しの失敗を作る。指定がない時と、読めない指定では、失敗を起こさない', () => {
+  const from = (query: string) => failuresFromQuery(new URLSearchParams(query))
+  expect(from('fake&failRead=1')).toEqual({ failReadAt: { read: 1, kind: undefined } })
+  expect(from('fake&failRead=2&failKind=disconnected')).toEqual({ failReadAt: { read: 2, kind: 'disconnected' } })
+  expect(from('fake&failRead=1&failKind=unknown')).toEqual({ failReadAt: { read: 1, kind: undefined } })
+  expect(from('fake')).toEqual({})
+  expect(from('fake&failRead=0')).toEqual({})
+  expect(from('fake&failRead=x')).toEqual({})
+})
+
 test('ほかから設定を変えられた場合を、本体の中身を直接書き換えてまねられる', async () => {
   const keyboard = createFakeCornix()
   const device = await keyboard.connect()
@@ -146,7 +179,7 @@ test('ほかから設定を変えられた場合を、本体の中身を直接�
   expect((await device.read()).keymap[0][0]).toBe(0x0005)
 })
 
-test('読み出しの画面に、偽の機器のデータを表示できる', async () => {
+test('診断の生の値の表に、偽の機器のデータを表示できる', async () => {
   const device = await createFakeCornix().connect()
   const report = buildReadReport({
     readAt: new Date('2026-10-12T00:00:00Z'),

@@ -13,6 +13,12 @@ const LAYER_TAP = { from: 0x4000, to: 0x4fff }
 /** Tap Dance。先頭の番号 + 枠の番号 */
 const TAP_DANCE = { from: 0x5700, count: 256 }
 
+/** Tap Dance のキーコードが指す枠の番号。Tap Dance でなければ undefined */
+export function tapDanceIndexOf(keycode: number): number | undefined {
+  const index = keycode - TAP_DANCE.from
+  return index >= 0 && index < TAP_DANCE.count ? index : undefined
+}
+
 /** MT と LT のタップ側。修飾なしの基本キーだけを動作に直す */
 function tapKeyOf(keycode: number): Action | undefined {
   const code = keycode & 0xff
@@ -68,8 +74,9 @@ export function decodeKey(
   tapDances: readonly TapDanceEntry[],
   customKeycodes: readonly CustomKeycode[] = [],
 ): KeyBehavior {
-  if (keycode >= TAP_DANCE.from && keycode < TAP_DANCE.from + TAP_DANCE.count) {
-    const entry = tapDances[keycode - TAP_DANCE.from]
+  const tapDance = tapDanceIndexOf(keycode)
+  if (tapDance !== undefined) {
+    const entry = tapDances[tapDance]
     if (entry) return decodeTapDance(entry, customKeycodes)
   }
   const expanded =

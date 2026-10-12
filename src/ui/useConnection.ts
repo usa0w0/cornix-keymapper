@@ -10,13 +10,16 @@ export function useConnection(connector: DeviceConnector) {
   const [state, setState] = useState<ConnectionState>({ status: 'disconnected' })
   const device = state.status === 'connected' ? state.device : null
 
-  const open = useCallback(async () => {
+  /** 機器選択を開いて接続する。接続できたら、その機器を返す（続けて読み出すため）。できなければ null */
+  const open = useCallback(async (): Promise<KeyboardDevice | null> => {
     setState({ status: 'connecting' })
     try {
       const connected = await connector.connect()
       setState(connected ? { status: 'connected', device: connected } : { status: 'disconnected' })
+      return connected
     } catch (error) {
       setState({ status: 'disconnected', notice: describeError(error) })
+      return null
     }
   }, [connector])
 

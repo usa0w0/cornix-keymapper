@@ -122,3 +122,15 @@ export function boundsOf(keys: readonly PlacedKey[]): Bounds {
   }
   return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) }
 }
+
+/**
+ * レイアウト定義に書かれたファームウェアの版（例: V1.12）。Cornix の定義は、配列の選択肢の欄（layouts.labels）に
+ * 「Firmware Version」という名前の選択肢として持つ。書かれていなければ undefined
+ */
+export function firmwareVersionOf(layout: LayoutDefinition): string | undefined {
+  const labels = (layout.raw as { layouts?: { labels?: unknown } } | null)?.layouts?.labels
+  for (const label of Array.isArray(labels) ? labels : []) {
+    if (Array.isArray(label) && label[0] === 'Firmware Version' && typeof label[1] === 'string') return label[1]
+  }
+  return undefined
+}

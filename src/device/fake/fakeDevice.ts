@@ -19,6 +19,8 @@ export interface FakeFailures {
   disconnectAtWrite?: number
   /** この番号の読み出しだけ、違う値を返す。本体の中身は変えない */
   alterReadAt?: { read: number; alter: (snapshot: KeyboardSnapshot) => void }
+  /** この番号の読み出しが、step を読んでいる途中で失敗する（step を省くと「キーマップ」）。読んだ内容は返さない */
+  failReadAt?: { read: number; step?: string; kind?: DeviceErrorKind }
 }
 
 export interface FakeOptions {
@@ -89,10 +91,15 @@ export class FakeDevice implements KeyboardDevice {
   async read(onProgress?: (progress: ReadProgress) => void): Promise<KeyboardSnapshot> {
     const { keyboard } = this
     const read = ++keyboard.readCount
+    const { failReadAt } = keyboard.failures
+    if (failReadAt?.read === read) keyboard.failures.failReadAt = undefined
     for (const step of READ_STEPS) {
       this.ensureConnected({ step })
       onProgress?.({ step, done: 0, total: 1 })
       await wait(keyboard.stepDelayMs)
+      if (failReadAt?.read === read && step === (failReadAt.step ?? 'キーマップ')) {
+        throw new DeviceError(failReadAt.kind ?? 'timeout', { step })
+      }
     }
     this.ensureConnected({ step: READ_STEPS.at(-1) })
 
@@ -150,6 +157,19 @@ export class FakeDevice implements KeyboardDevice {
   private ensureConnected(where: { step?: string; operation?: number }): void {
     if (this.closed) throw new DeviceError('disconnected', where)
   }
+}
+
+const ERROR_KINDS: readonly DeviceErrorKind[] = ['timeout', 'send-failed', 'disconnected', 'unexpected-response']
+
+/**
+ * URL の指定から、わざと起こす失敗を作る。画面で失敗の場面を確かめるための入口で、ふだんの画面には出さない。
+ * failRead=N で N 回目の読み出しが失敗する。failKind で失敗の種類（省くと timeout）を選ぶ
+ */
+export function failuresFromQuery(query: URLSearchParams): FakeFailures {
+  const read = Number(query.get('failRead'))
+  if (!Number.isInteger(read) || read < 1) return {}
+  const kind = ERROR_KINDS.find((known) => known === query.get('failKind'))
+  return { failReadAt: { read, kind } }
 }
 
 /** 操作を1つ、本体の中身に反映する。本体にない場所を指す操作は、呼び出し側の誤りとして RangeError にする */

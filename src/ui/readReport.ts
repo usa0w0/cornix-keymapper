@@ -82,20 +82,42 @@ export function buildReadReport(input: {
   }
 }
 
-/** 読み出しの失敗を、どこで・なぜ・次に何をするか、の順に説明する */
-export function describeReadError(error: unknown): string {
+export interface ReadFailure {
+  /** どこで・なぜ失敗したか */
+  cause: string
+  /** 次に何をするか */
+  advice: string
+}
+
+/** 読み出しの失敗を、どこで・なぜ失敗したかと、次に何をするかに分けて説明する */
+export function describeReadError(error: unknown): ReadFailure {
   if (!(error instanceof DeviceError)) {
-    return `原因が分かりません。（${error instanceof Error ? error.message : String(error)}）`
+    return {
+      cause: `原因が分かりません。（${error instanceof Error ? error.message : String(error)}）`,
+      advice: 'キーボードをつなぎ直してから、もう一度読み出してください。',
+    }
   }
   const where = error.step ? `「${error.step}」を読んでいる途中で、` : ''
   switch (error.kind) {
     case 'timeout':
-      return `${where}キーボードから応答がなくなりました。電源と接続を確かめて、「もう一度読み出す」を押してください。`
+      return {
+        cause: `${where}キーボードから応答がなくなりました。`,
+        advice: '電源と接続を確かめてから、もう一度読み出してください。',
+      }
     case 'send-failed':
-      return `${where}キーボードへ送信できませんでした。つなぎ直してから、接続し直してください。`
+      return {
+        cause: `${where}キーボードへ送信できませんでした。`,
+        advice: 'キーボードをつなぎ直してから、「切断」を押して接続し直してください。',
+      }
     case 'disconnected':
-      return `${where}キーボードとの接続が切れました。つなぎ直してから、接続し直してください。`
+      return {
+        cause: `${where}キーボードとの接続が切れました。`,
+        advice: 'キーボードをつなぎ直してから、「切断」を押して接続し直してください。',
+      }
     case 'unexpected-response':
-      return `${where}キーボードから想定と違う応答が返りました。Vial など他のアプリやタブで開いている場合は閉じて、「もう一度読み出す」を押してください。`
+      return {
+        cause: `${where}キーボードから想定と違う応答が返りました。`,
+        advice: 'Vial など、ほかのアプリやタブで開いている場合は閉じてから、もう一度読み出してください。',
+      }
   }
 }
