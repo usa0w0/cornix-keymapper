@@ -360,9 +360,49 @@
   color: var(--muted);
 }
 
-.proto .edit-note button {
-  margin-left: 0.6rem;
+.proto .edit-note {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.proto button.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.2rem 0.3rem;
+  border: none;
+  background: none;
   color: var(--text);
+}
+
+.proto .switch-track {
+  position: relative;
+  width: 2.2rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background 0.15s;
+}
+
+.proto .switch-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(1.25rem - 4px);
+  height: calc(1.25rem - 4px);
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+
+.proto .switch[aria-checked='true'] .switch-track {
+  background: var(--accent);
+}
+
+.proto .switch[aria-checked='true'] .switch-track::after {
+  transform: translateX(0.95rem);
 }
 
 .proto .fields {

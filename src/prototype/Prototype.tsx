@@ -310,25 +310,22 @@ function EditPanel(props: {
           🔒 このキーの動作は、このサイトでは編集できません。内容はそのまま残ります。別の動作で上書きすることはできます。
         </p>
       )}
-      {view.state === 'transparent' && (
+      {(view.state === 'transparent' || view.state === 'none') && (
         <p className="edit-note">
-          透過のキーです。下のレイヤーの動作（{view.inherited?.slots.tap?.full ?? '何もしない'}
-          ）がそのまま効きます。
-          <button type="button" onClick={() => onChange({ state: 'none', slots: {} })}>
-            透過をやめる
-          </button>
-        </p>
-      )}
-      {view.state === 'none' && (
-        <p className="edit-note">
-          欄がすべて空なので、このキーは押しても何も起きません。
           <button
             type="button"
-            title="下のレイヤーの動作が、そのまま効くようにする"
-            onClick={() => onChange({ state: 'transparent', slots: {} })}
+            role="switch"
+            className="switch"
+            aria-checked={view.state === 'transparent'}
+            title="オンにすると、下のレイヤーの動作がそのまま効く"
+            onClick={() => onChange({ state: view.state === 'transparent' ? 'none' : 'transparent', slots: {} })}
           >
-            透過にする
+            <span className="switch-track" />
+            透過
           </button>
+          {view.state === 'transparent'
+            ? `下のレイヤーの動作（${view.inherited?.slots.tap?.full ?? '何もしない'}）がそのまま効きます。`
+            : '欄がすべて空なので、このキーは押しても何も起きません。'}
         </p>
       )}
       <div className={`fields ${isEncoder ? 'fields-one' : ''}`}>
