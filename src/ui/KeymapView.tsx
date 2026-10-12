@@ -60,16 +60,33 @@ export function KeymapView({ snapshot }: { snapshot: KeyboardSnapshot }) {
 }
 
 const a = { short: 'A', full: 'A' }
-// この時点で図に出る状態だけを並べる。欄の組み合わせ、変更あり、選択中は、それぞれを作る時に足す
+// この時点で図に出る状態だけを並べる。変更あり、選択中は、それぞれを作る時に足す
 const SAMPLES: readonly { name: string; view: KeyView }[] = [
-  { name: 'ふつうのキー', view: { state: 'normal', label: a } },
-  { name: 'レイヤー切り替え', view: { state: 'normal', label: { short: 'レイヤー 2', note: '押している間', full: '' } } },
-  { name: '空（何もしない）', view: { state: 'none', label: { short: '', full: '' } } },
+  { name: 'タップだけ', view: { state: 'normal', slots: { tap: a } } },
+  { name: 'タップと長押し', view: { state: 'normal', slots: { tap: a, hold: { short: 'Ctrl', full: '左 Ctrl' } } } },
+  {
+    name: '4つとも',
+    view: {
+      state: 'normal',
+      slots: {
+        tap: a,
+        hold: { short: 'Ctrl', full: '' },
+        doubleTap: { short: 'Esc', full: '' },
+        tapHold: { short: 'Shift', full: '' },
+      },
+    },
+  },
+  { name: '長押しだけ', view: { state: 'normal', slots: { hold: { short: 'レイヤー 2', note: '押している間', full: '' } } } },
+  { name: '空（何もしない）', view: { state: 'none', slots: {} } },
   {
     name: '透過',
-    view: { state: 'transparent', label: { short: '透過', full: '透過' }, inherited: { layer: 0, state: 'normal', label: a } },
+    view: {
+      state: 'transparent',
+      slots: { tap: { short: '透過', full: '透過' } },
+      inherited: { layer: 0, state: 'normal', slots: { tap: a } },
+    },
   },
-  { name: '編集不可', view: { state: 'locked', label: { short: 'BT0', full: 'BT0' } } },
+  { name: '編集不可', view: { state: 'locked', slots: { tap: { short: 'BT0', full: 'BT0' } } } },
 ]
 
 /** キーの見え方の見本。レイヤーの行の「?」から開く */
@@ -93,7 +110,7 @@ function KeyLegend({ id }: { id: string }) {
         ))}
       </ul>
       <p className="legend-note">
-        透過のキーには、下のレイヤーで実際に効く動作を薄く出します。レイヤーの番号が薄いものは、キーが1つも割り当てられていないレイヤーです。
+        大きな字がタップ、「長押し」「2回」（2回タップ）「2回長」（タップ後長押し）の印が付いた小さな字が、ほかの押し方の動作です。透過のキーには、下のレイヤーで実際に効く動作を薄く出します。レイヤーの番号が薄いものは、キーが1つも割り当てられていないレイヤーです。
       </p>
     </section>
   )

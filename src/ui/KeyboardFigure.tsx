@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react'
 import { boundsOf, type Bounds, type PlacedKey } from '../model/layout.ts'
-import { isLong, targetId, targetName, targetOf, type KeyTarget, type KeyView } from './keyView.ts'
+import { filledSlots, type BehaviorSlot } from '../model/behavior.ts'
+import { isLong, slotsName, targetId, targetName, targetOf, type KeyTarget, type KeyView } from './keyView.ts'
 
 /** キー1つぶんの大きさと、キーどうしのすき間（px） */
 const UNIT = 64
@@ -57,15 +58,24 @@ export function KeyboardFigure({ keys, viewOf }: { keys: readonly PlacedKey[]; v
 
 /** マウスを載せた時に出す、省略しない名前 */
 function titleOf(view: KeyView): string {
-  if (view.state === 'locked') return `${view.label.full}（このサイトでは編集不可）`
-  if (view.state !== 'transparent') return view.label.full
+  if (view.state === 'locked') return `${slotsName(view.slots)}（このサイトでは編集不可）`
+  if (view.state !== 'transparent') return slotsName(view.slots)
   if (!view.inherited) return '透過（下のレイヤーに、効く動作がありません）'
-  return `透過（レイヤー ${view.inherited.layer} の「${view.inherited.label.full}」が効きます）`
+  return `透過（レイヤー ${view.inherited.layer} の「${slotsName(view.inherited.slots)}」が効きます）`
 }
 
-/** キーの上の表示。透過キーは、下のレイヤーで実際に効く動作を出す（薄くするのはスタイルの側） */
+/** 小さく出す欄に付ける印。タップには付けない */
+const SLOT_TAGS: Record<BehaviorSlot, string> = { tap: '', hold: '長押し', doubleTap: '2回', tapHold: '2回長' }
+
+/**
+ * キーの上の表示。タップを大きく、ほかの欄を、印を付けて小さく出す。タップのないキーは、最初の欄を、印を付けて大きく出す。
+ * 透過キーは、下のレイヤーで実際に効く動作を出す（薄くするのはスタイルの側）
+ */
 export function KeyFace({ view }: { view: KeyView }) {
-  const shown = view.state === 'transparent' ? view.inherited : view
+  const slots = (view.state === 'transparent' ? view.inherited?.slots : view.slots) ?? {}
+  // 「何もしない」は字を出さない
+  const shown = filledSlots(slots).filter((slot) => slots[slot]!.short !== '')
+  const main = shown[0]
   return (
     <>
       {view.state === 'locked' && (
@@ -74,17 +84,24 @@ export function KeyFace({ view }: { view: KeyView }) {
         </span>
       )}
       {view.state === 'transparent' && <span className="mark-transparent">透過</span>}
-      {shown?.label.shifted && (
+      {main === 'tap' && slots.tap!.shifted && (
         <span className="face-shifted" title="Shift を押しながら打った時に出る字">
-          {shown.label.shifted}
+          {slots.tap!.shifted}
         </span>
       )}
-      {shown && shown.label.short !== '' && (
+      {main && (
         <span className="face-main">
-          <b className={isLong(shown.label.short) ? 'long' : ''}>{shown.label.short}</b>
-          {shown.label.note && <small>{shown.label.note}</small>}
+          {main !== 'tap' && <i>{SLOT_TAGS[main]}</i>}
+          <b className={isLong(slots[main]!.short) ? 'long' : ''}>{slots[main]!.short}</b>
+          {slots[main]!.note && <small>{slots[main]!.note}</small>}
         </span>
       )}
+      {shown.slice(1).map((slot) => (
+        <span className="face-extra" key={slot}>
+          <i>{SLOT_TAGS[slot]}</i>
+          {slots[slot]!.short}
+        </span>
+      ))}
     </>
   )
 }
