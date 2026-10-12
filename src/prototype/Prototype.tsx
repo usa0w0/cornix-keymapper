@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react'
 import type { KeyboardSnapshot } from '../device/types.ts'
 import { bounds, placeKeys, type PlacedKey } from './kle.ts'
-import { SLOT_NAMES, viewKey, viewKeyAt, type KeyView, type Slot } from './labels.ts'
+import { SLOT_NAMES, viewKey, viewKeyAt, type KeyView, type Legend, type Slot } from './labels.ts'
 import './prototype.css'
 
 const UNIT = 64
@@ -21,6 +21,9 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
     return Number.isInteger(requested) && requested >= 0 && requested < snapshot.keymap.length ? requested : 0
   })
   const [selection, setSelection] = useState<Selection | null>(null)
+  const [legend, setLegend] = useState<Legend>(() =>
+    new URLSearchParams(location.search).get('legend') === 'jis' ? 'jis' : 'us',
+  )
   const { cols } = snapshot.layout
   const usedTapDances = snapshot.tapDances.filter((t) => t.onTap || t.onHold || t.onDoubleTap || t.onTapHold).length
   const usedCombos = snapshot.combos.filter((c) => c.output !== 0).length
@@ -77,11 +80,20 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
             <button type="button" className="help" popoverTarget="proto-legend" aria-label="キーの見え方">
               ?
             </button>
+            <span className="spacer" />
+            <span className="layers-title" title="パソコン側の配列の設定に合わせて、キーの字の見え方を切り替える。本体に書く内容は変わらない">
+              刻印
+            </span>
+            {(['us', 'jis'] as const).map((kind) => (
+              <button type="button" key={kind} aria-pressed={legend === kind} onClick={() => setLegend(kind)}>
+                {kind.toUpperCase()}
+              </button>
+            ))}
           </div>
 
-          <KeyboardFigure snapshot={snapshot} layer={layer} selection={selection} onSelect={setSelection} />
+          <KeyboardFigure snapshot={snapshot} layer={layer} legend={legend} selection={selection} onSelect={setSelection} />
 
-          <EditPanel snapshot={snapshot} layer={layer} selection={selection} cols={cols} />
+          <EditPanel snapshot={snapshot} layer={layer} legend={legend} selection={selection} cols={cols} />
           <Legend />
         </>
       )}
@@ -92,10 +104,11 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
 function KeyboardFigure(props: {
   snapshot: KeyboardSnapshot
   layer: number
+  legend: Legend
   selection: Selection | null
   onSelect: (selection: Selection) => void
 }) {
-  const { snapshot, layer, selection, onSelect } = props
+  const { snapshot, layer, legend, selection, onSelect } = props
   const keys = useMemo(
     () => placeKeys((snapshot.layout.raw as { layouts?: { keymap?: unknown } }).layouts?.keymap),
     [snapshot],
@@ -128,12 +141,12 @@ function KeyboardFigure(props: {
                 onClick={() => onSelect({ kind: 'encoder', encoder: key.encoder, direction: key.direction })}
               >
                 <span className="encoder-turn">{key.direction === 0 ? '↺ 左回し' : '右回し ↻'}</span>
-                <KeyFace view={viewKey(code, snapshot)} />
+                <KeyFace view={viewKey(code, snapshot, legend)} />
               </button>
             )
           }
           const index = key.row * snapshot.layout.cols + key.col
-          const view = viewKeyAt(snapshot, layer, index)
+          const view = viewKeyAt(snapshot, layer, index, legend)
           return (
             <button
               type="button"
@@ -190,8 +203,14 @@ function KeyFace({ view, changed }: { view: KeyView; changed?: boolean }) {
   )
 }
 
-function EditPanel(props: { snapshot: KeyboardSnapshot; layer: number; selection: Selection | null; cols: number }) {
-  const { snapshot, layer, selection, cols } = props
+function EditPanel(props: {
+  snapshot: KeyboardSnapshot
+  layer: number
+  legend: Legend
+  selection: Selection | null
+  cols: number
+}) {
+  const { snapshot, layer, legend, selection, cols } = props
   if (!selection) {
     return (
       <section className="edit" aria-label="選んだキー">
@@ -201,7 +220,7 @@ function EditPanel(props: { snapshot: KeyboardSnapshot; layer: number; selection
   }
   if (selection.kind === 'encoder') {
     const code = snapshot.encoders[layer][selection.encoder][selection.direction]
-    const view = viewKey(code, snapshot)
+    const view = viewKey(code, snapshot, legend)
     return (
       <section className="edit" aria-label="選んだキー">
         <h2>
@@ -213,7 +232,7 @@ function EditPanel(props: { snapshot: KeyboardSnapshot; layer: number; selection
       </section>
     )
   }
-  const view = viewKeyAt(snapshot, layer, selection.index)
+  const view = viewKeyAt(snapshot, layer, selection.index, legend)
   return (
     <section className="edit" aria-label="選んだキー">
       <h2>
@@ -234,19 +253,13 @@ function EditPanel(props: { snapshot: KeyboardSnapshot; layer: number; selection
           <Field
             key={slot}
             name={SLOT_NAMES[slot]}
-            value={describe(view.slots[slot])}
+            value={view.slots[slot]?.full}
             placeholder={slot === 'tap' && view.state !== 'normal' ? (view.state === 'transparent' ? '透過' : '何もしない') : undefined}
           />
         ))}
       </div>
     </section>
   )
-}
-
-/** 編集欄に出す名前。Shift で変わる字があれば添える */
-function describe(label?: { full: string; shifted?: string }): string | undefined {
-  if (!label) return undefined
-  return label.shifted ? `${label.full}（Shift を押しながらだと ${label.shifted}）` : label.full
 }
 
 function Field({ name, value, placeholder }: { name: string; value?: string; placeholder?: string }) {
@@ -272,7 +285,6 @@ function Legend() {
   const a = { short: 'A', full: 'A' }
   const samples: { name: string; view: KeyView; changed?: boolean; selected?: boolean }[] = [
     { name: 'タップだけ', view: sample({ tap: a }) },
-    { name: 'Shift で変わる字', view: sample({ tap: { short: '1', full: '1', shifted: '!' } }) },
     { name: 'タップと長押し', view: sample({ tap: a, hold: { short: 'Ctrl', full: '左 Ctrl' } }) },
     {
       name: '4つとも',

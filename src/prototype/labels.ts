@@ -42,12 +42,24 @@ const BASIC: Record<number, [string, string?]> = {
   228: ['Ctrl', '右 Ctrl'], 229: ['Shift', '右 Shift'], 230: ['Alt', '右 Alt'], 231: ['GUI', '右 GUI（Cmd / Win）'],
 }
 
+/** キーの刻印を、どの配列で表すか。本体に書く内容は変わらず、見え方だけが変わる */
+export type Legend = 'us' | 'jis'
+
+// 接続先の OS が JIS 配列の時に、同じキーコードで出る字。[そのまま, Shift を押しながら]
+const JIS: Record<number, [string, string?]> = {
+  31: ['2', '"'], 35: ['6', '&'], 36: ['7', "'"], 37: ['8', '('], 38: ['9', ')'], 39: ['0'],
+  45: ['-', '='], 46: ['^', '~'], 47: ['@', '`'], 48: ['[', '{'], 49: [']', '}'],
+  51: [';', '+'], 52: [':', '*'], 53: ['半/全'],
+}
+
 const SHIFTED: Record<number, string> = {
   30: '!', 31: '@', 32: '#', 33: '$', 34: '%', 35: '^', 36: '&', 37: '*', 38: '(', 39: ')',
   45: '_', 46: '+', 47: '{', 48: '}', 49: '|', 51: ':', 52: '"', 53: '~', 54: '<', 55: '>', 56: '?',
 }
 
-function basic(code: number): Label {
+function basic(code: number, legend: Legend): Label {
+  const jis = legend === 'jis' ? JIS[code] : undefined
+  if (jis) return { short: jis[0], full: jis[0], shifted: jis[1] }
   if (code >= 4 && code <= 29) {
     const letter = String.fromCharCode(61 + code)
     return { short: letter, full: letter }
@@ -83,31 +95,32 @@ function layerAction(code: number): Label | undefined {
   }
 }
 
-export function viewKey(code: number, snapshot: KeyboardSnapshot): KeyView {
+export function viewKey(code: number, snapshot: KeyboardSnapshot, legend: Legend = 'us'): KeyView {
   if (code === 0) return { state: 'none', slots: {} }
   if (code === 1) return { state: 'transparent', slots: {} }
   const layer = layerAction(code)
   // 長押しだけのレイヤー切替（MO）は「長押し」の欄、それ以外は「タップ」の欄
   if (layer) return { state: 'normal', slots: code >= 0x5220 && code < 0x5240 ? { hold: layer } : { tap: layer } }
-  if (code < 0x0100) return { state: 'normal', slots: { tap: basic(code) } }
+  if (code < 0x0100) return { state: 'normal', slots: { tap: basic(code, legend) } }
   if (code < 0x2000) {
     const mods = modifierNames((code >> 8) & 0x0f)
     const key = code & 0xff
-    if (mods.length === 1 && mods[0] === 'Shift' && SHIFTED[key]) {
-      return { state: 'normal', slots: { tap: { short: SHIFTED[key], full: `${SHIFTED[key]}（Shift + ${basic(key).full}）` } } }
+    const shifted = basic(key, legend).shifted
+    if (mods.length === 1 && mods[0] === 'Shift' && shifted) {
+      return { state: 'normal', slots: { tap: { short: shifted, full: `${shifted}（Shift + ${basic(key, legend).full}）` } } }
     }
-    const name = [...mods, basic(key).short].join('+')
-    return { state: 'normal', slots: { tap: { short: name, full: [...mods, basic(key).full].join(' + ') } } }
+    const name = [...mods, basic(key, legend).short].join('+')
+    return { state: 'normal', slots: { tap: { short: name, full: [...mods, basic(key, legend).full].join(' + ') } } }
   }
   if (code >= 0x2000 && code < 0x4000) {
     const mods = modifierNames((code >> 8) & 0x0f)
-    return { state: 'normal', slots: { tap: basic(code & 0xff), hold: { short: mods.join('+'), full: mods.join(' + ') } } }
+    return { state: 'normal', slots: { tap: basic(code & 0xff, legend), hold: { short: mods.join('+'), full: mods.join(' + ') } } }
   }
   if (code >= 0x4000 && code < 0x5000) {
     const n = (code >> 8) & 0x0f
     return {
       state: 'normal',
-      slots: { tap: basic(code & 0xff), hold: { short: `レイヤー ${n}`, note: '押している間', full: `押している間だけレイヤー ${n}` } },
+      slots: { tap: basic(code & 0xff, legend), hold: { short: `レイヤー ${n}`, note: '押している間', full: `押している間だけレイヤー ${n}` } },
     }
   }
   if (code >= 0x5700 && code < 0x5800) {
@@ -121,7 +134,7 @@ export function viewKey(code: number, snapshot: KeyboardSnapshot): KeyView {
       ['tapHold', entry.onTapHold],
     ] as const) {
       if (value === 0) continue
-      const inner = viewKey(value, snapshot)
+      const inner = viewKey(value, snapshot, legend)
       slots[slot] = inner.slots.tap ?? inner.slots.hold
     }
     return { state: 'normal', slots }
@@ -142,11 +155,11 @@ function customKeycodes(snapshot: KeyboardSnapshot): { name?: string; title?: st
 }
 
 /** 透過キーに、下のレイヤーで実際に効く動作を添える */
-export function viewKeyAt(snapshot: KeyboardSnapshot, layer: number, key: number): KeyView {
-  const view = viewKey(snapshot.keymap[layer][key], snapshot)
+export function viewKeyAt(snapshot: KeyboardSnapshot, layer: number, key: number, legend: Legend = 'us'): KeyView {
+  const view = viewKey(snapshot.keymap[layer][key], snapshot, legend)
   if (view.state !== 'transparent') return view
   for (let below = layer - 1; below >= 0; below--) {
-    const lower = viewKey(snapshot.keymap[below][key], snapshot)
+    const lower = viewKey(snapshot.keymap[below][key], snapshot, legend)
     if (lower.state !== 'transparent') return { ...view, inherited: lower }
   }
   return view
