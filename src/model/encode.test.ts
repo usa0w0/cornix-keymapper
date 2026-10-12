@@ -4,11 +4,14 @@ import { cornixSnapshot } from '../device/fake/cornix.ts'
 import type { Action } from './action.ts'
 import type { KeyBehavior } from './behavior.ts'
 import { decodeKey, tapDanceIndexOf } from './decode.ts'
-import type { EncoderEdit, Edits, KeyEdit } from './edits.ts'
+import type { ComboEdit, ComboKey, EncoderEdit, Edits, KeyEdit } from './edits.ts'
 import {
   applyEdits,
+  comboKeycode,
+  countFreeCombos,
   countFreeTapDances,
   encodeBehavior,
+  encodeComboOutput,
   encodeEncoderAction,
   planKeyEdits,
   tapDanceUses,
@@ -378,7 +381,7 @@ test('新しく使う枠と、空にする枠の時間の値は、その枠の�
   expect(plan.tapDances[1]).toEqual({ ...EMPTY, tappingTerm: 300 })
 })
 
-test('枠が使われているかは、キーに加えて、エンコーダーとコンボの出力も数える', () => {
+test('枠が使われているかは、キーに加えて、エンコーダーとコンボも数える', () => {
   // 枠 2 はエンコーダーから、枠 3 はコンボの出力から指されている（中身は空）。枠 1 は、キーとコンボの両方から
   const source = altered((s) => {
     s.encoders[4][1] = [TD + 2, 0x00da]
@@ -422,9 +425,174 @@ test('本体の設定に直せない動作と、出発点にない場所の編�
   expect(() => applyEdits(structuredClone(source), edits(bad))).toThrow('直せない')
 })
 
-test('コンボの編集は、まだ本体の設定に直せない', () => {
-  const withCombo: Edits = { ...edits(), combos: [{ ref: { added: 0 }, combo: { keys: [0x04, 0x05], output: A } }] }
-  expect(() => applyEdits(cornixSnapshot(), withCombo)).toThrow('まだない')
+// ---- コンボ ----
+// 実機の設定には、コンボが1つもない（32 枠すべて空）。レイヤー 0 は、Q が キー 1、W が キー 2
+
+const Q = 0x14
+const W = 0x1a
+const NO_KEYS: [number, number, number, number] = [0, 0, 0, 0]
+const EMPTY_COMBO = { keys: NO_KEYS, output: 0 }
+const combos = (...list: ComboEdit[]): Edits => ({ keys: [], encoders: [], combos: list })
+const added = (number: number, keys: ComboKey[], output: Action): ComboEdit => ({ ref: { added: number }, combo: { keys, output } })
+
+test('コンボの出力は、動作1つをキーコード1つに直す。「押している間だけレイヤー N」と「何もしない」は入れられない', () => {
+  expect(encodeComboOutput(ESC)).toBe(0x29)
+  expect(encodeComboOutput(CTRL_C)).toBe(0x0106)
+  expect(encodeComboOutput({ kind: 'layer', mode: 'toggle', layer: 2 })).toBe(0x5262)
+  expect(encodeComboOutput(mo(1))).toBeUndefined()
+  expect(encodeComboOutput({ kind: 'none' })).toBeUndefined()
+  expect(encodeComboOutput({ kind: 'transparent' })).toBeUndefined()
+  // 本体から読んだ、このサイトで扱わない動作は、元の値に戻る
+  expect(encodeComboOutput({ kind: 'unsupported', raw: TD + 3, label: 'Tap Dance 3' })).toBe(TD + 3)
+})
+
+test('足したコンボは、足した順に、空いている枠の番号の小さいものへ入る。編集していないコンボは、出発点の値のまま', () => {
+  // 枠 0 と 2 に、本体のコンボがある（枠 2 の出力は、このサイトで扱わないキーコード）
+  const source = altered((s) => {
+    s.combos[0] = { keys: [0x04, 0x05, 0, 0], output: 0x29 }
+    s.combos[2] = { keys: [0x06, 0x07, 0x08, 0x09], output: 0x7e00 }
+  })
+  expect(countFreeCombos(source.combos)).toBe(30)
+  // 足した順の番号が逆に並んでいても、結果は同じ
+  const applied = combos(added(1, [Q, W, 0x08], CTRL_C), added(0, [Q, W], ESC))
+  const target = targetOf(source, applied)
+  expect(target.combos[1]).toEqual({ keys: [Q, W, 0, 0], output: 0x29 })
+  expect(target.combos[3]).toEqual({ keys: [Q, W, 0x08, 0], output: 0x0106 })
+  expect(target.combos[0]).toEqual(source.combos[0])
+  expect(target.combos[2]).toEqual(source.combos[2])
+  expect(target.combos.slice(4)).toEqual(source.combos.slice(4))
+  // キーマップ、エンコーダー、Tap Dance の枠は変わらない
+  expect({ ...target, combos: source.combos }).toEqual(source)
+  expect(planKeyEdits(source, applied)).toMatchObject({
+    freeCombos: 28,
+    missingCombos: 0,
+    invalidCombos: [],
+    addedCombos: [{ added: 0, slot: 1 }, { added: 1, slot: 3 }],
+  })
+})
+
+test('出発点にあるコンボを変えると、その枠に書く。消すと、その枠を空にする', () => {
+  const source = altered((s) => {
+    s.combos[0] = { keys: [0x04, 0x05, 0, 0], output: 0x29 }
+    s.combos[2] = { keys: [0x06, 0x07, 0x08, 0x09], output: 0x7e00 }
+  })
+  const applied = combos(
+    { ref: { slot: 0 }, combo: null },
+    // 同時に押すキーだけを変えた時は、このサイトで扱わない出力を、元の値のまま保つ
+    { ref: { slot: 2 }, combo: { keys: [Q, W], output: { kind: 'unsupported', raw: 0x7e00, label: 'BT0' } } },
+  )
+  const target = targetOf(source, applied)
+  expect(target.combos[0]).toEqual(EMPTY_COMBO)
+  expect(target.combos[2]).toEqual({ keys: [Q, W, 0, 0], output: 0x7e00 })
+  expect(planKeyEdits(source, applied).freeCombos).toBe(31)
+})
+
+test('コンボの枠が足りない時は、足りない数を返し、目標は作れない。消したコンボの枠は、足したコンボに使える', () => {
+  const source = altered((s) => {
+    s.combos = s.combos.map((_, slot) => ({ keys: [0x04, 0x05 + slot, 0, 0], output: 0x29 }))
+  })
+  expect(countFreeCombos(source.combos)).toBe(0)
+  const short = planKeyEdits(source, combos(added(0, [Q, W], ESC)))
+  expect(short).toMatchObject({ missingCombos: 1, freeCombos: 0, addedCombos: [] })
+  expect(short.combos).toEqual(source.combos)
+  expect(() => applyEdits(structuredClone(source), combos(added(0, [Q, W], ESC)))).toThrow('コンボの枠が 1 個足りない')
+  // 枠 5 のコンボを消すと、足したコンボは、その枠に入る
+  const swapped = combos({ ref: { slot: 5 }, combo: null }, added(0, [Q, W], ESC))
+  expect(planKeyEdits(source, swapped)).toMatchObject({ missingCombos: 0, freeCombos: 0, addedCombos: [{ added: 0, slot: 5 }] })
+  expect(targetOf(source, swapped).combos[5]).toEqual({ keys: [Q, W, 0, 0], output: 0x29 })
+})
+
+test('本体の設定に直せないコンボと、出発点にない枠のコンボは、invalidCombos として返し、目標は作れない', () => {
+  const source = cornixSnapshot()
+  const bad = [
+    added(0, [Q], ESC),
+    added(1, [Q, W, 0x04, 0x05, 0x06], ESC),
+    added(2, [Q, W], mo(1)),
+    added(3, [Q, 0], ESC),
+    { ref: { slot: 99 }, combo: { keys: [Q, W], output: ESC } },
+  ]
+  const plan = planKeyEdits(source, combos(...bad))
+  expect(plan.invalidCombos).toHaveLength(5)
+  expect(plan.combos).toEqual(source.combos)
+  expect(plan.freeCombos).toBe(32)
+  expect(() => applyEdits(structuredClone(source), combos(bad[0]))).toThrow('直せないコンボ')
+})
+
+test('コンボの出力が Tap Dance を指していれば、その枠は使われている。そのコンボを消すと、枠は使われなくなって空になる', () => {
+  // 枠 5 は、コンボの出力だけから指されている
+  const source = altered((s) => {
+    s.tapDances[5] = A_ESC_ENTRY
+    s.combos[0] = { keys: [Q, W, 0, 0], output: TD + 5 }
+  })
+  expect(countFreeTapDances(source)).toBe(29)
+  const removed = planKeyEdits(source, combos({ ref: { slot: 0 }, combo: null }))
+  expect(removed.tapDances[5]).toEqual(EMPTY)
+  expect(removed.free).toBe(30)
+  // 出力を別の動作に変えても、同じ
+  const changed = planKeyEdits(source, combos({ ref: { slot: 0 }, combo: { keys: [Q, W], output: ESC } }))
+  expect(changed.tapDances[5]).toEqual(EMPTY)
+  expect(changed.combos[0]).toEqual({ keys: [Q, W, 0, 0], output: 0x29 })
+})
+
+test('コンボの同時に押すキーが Tap Dance を指していれば、その枠は使われている（キーを変えても、枠を空にしない）', () => {
+  // レイヤー 0 の キー 54 は枠 1 を指す。コンボも、枠 1 を指すキーコードを、同時に押すキーに持つ
+  const source = altered((s) => (s.combos[0] = { keys: [Q, TD + 1, 0, 0], output: 0x29 }))
+  expect(tapDanceUses(source)[1]).toEqual({ slot: 1, keys: [{ layer: 0, key: 54 }], others: 1 })
+  const plan = planKeyEdits(source, edits(edit(0, 54, { tap: A })))
+  expect(plan.tapDances[1]).toEqual(source.tapDances[1])
+  expect(plan.free).toBe(30)
+  // コンボを消せば、枠は使われなくなって空になる
+  const both = planKeyEdits(source, { ...edits(edit(0, 54, { tap: A })), combos: [{ ref: { slot: 0 }, combo: null }] })
+  expect(both.tapDances[1]).toEqual(EMPTY)
+  expect(both.free).toBe(31)
+})
+
+test('編集して Tap Dance になるキーをコンボに使う時は、4欄の中身で持ち、目標を作る時に、その枠を指すキーコードに直す', () => {
+  const source = cornixSnapshot()
+  const fields = { onTap: 0x04, onHold: 0, onDoubleTap: 0x29, onTapHold: 0 }
+  const combo = added(0, [Q, { tapDance: fields }], ESC)
+  // キー 2 を「A、2回タップで Esc」にして、コンボに使う。枠は 2 になる
+  const one: Edits = { ...edits(edit(0, 2, A_ESC)), combos: [combo] }
+  const plan = planKeyEdits(source, one)
+  expect(plan.keymap[0][2]).toBe(TD + 2)
+  expect(plan.combos[0]).toEqual({ keys: [Q, TD + 2, 0, 0], output: 0x29 })
+  expect(comboKeycode(plan, { tapDance: fields })).toBe(TD + 2)
+  expect(comboKeycode(plan, Q)).toBe(Q)
+  // その後で、前にあるキーが別の枠を使うと、枠の番号がずれる。コンボは、同じ中身のキーを指し続ける
+  const two: Edits = { ...edits(edit(0, 1, B_ESC), edit(0, 2, A_ESC)), combos: [combo] }
+  const shifted = targetOf(source, two)
+  expect(shifted.keymap[0][1]).toBe(TD + 2)
+  expect(shifted.keymap[0][2]).toBe(TD + 3)
+  expect(shifted.tapDances[3]).toEqual(A_ESC_ENTRY)
+  expect(shifted.combos[0]).toEqual({ keys: [Q, TD + 3, 0, 0], output: 0x29 })
+})
+
+test('コンボが中身で持っているキーを、後から別の動作に変えても、コンボの中身の枠は残る（コンボは、そのキーから外れる）', () => {
+  const source = cornixSnapshot()
+  const fields = { onTap: 0x04, onHold: 0, onDoubleTap: 0x29, onTapHold: 0 }
+  const combo = added(0, [Q, { tapDance: fields }], ESC)
+  // キー 2 は、別の中身（B、2回タップで Esc）になった
+  const plan = planKeyEdits(source, { ...edits(edit(0, 2, B_ESC)), combos: [combo] })
+  expect(plan.missing).toBe(0)
+  expect(plan.keymap[0][2]).toBe(TD + 2)
+  expect(plan.tapDances[2]).toEqual(B_ESC_ENTRY)
+  expect(plan.tapDances[3]).toEqual(A_ESC_ENTRY)
+  expect(plan.combos[0]).toEqual({ keys: [Q, TD + 3, 0, 0], output: 0x29 })
+  expect(plan.free).toBe(28)
+  // 出発点に同じ中身の枠があれば、その枠を指す。どのキーからも指されていなくても、その枠は空にしない
+  const held = altered((s) => (s.tapDances[1] = { ...fields, tappingTerm: 250 }))
+  const reused = planKeyEdits(held, { ...edits(edit(0, 54, { tap: B })), combos: [combo] })
+  expect(reused.combos[0]).toEqual({ keys: [Q, TD + 1, 0, 0], output: 0x29 })
+  expect(reused.tapDances[1]).toEqual(held.tapDances[1])
+})
+
+test('コンボのキーの中身に枠を割り当てられない時は、Tap Dance の枠が足りない', () => {
+  const source = full()
+  const combo = added(0, [Q, { tapDance: { onTap: 0x04, onHold: 0, onDoubleTap: 0x29, onTapHold: 0 } }], ESC)
+  const plan = planKeyEdits(source, combos(combo))
+  expect(plan.missing).toBe(1)
+  expect(plan.combos).toEqual(source.combos)
+  expect(() => applyEdits(structuredClone(source), combos(combo))).toThrow('Tap Dance の枠が 1 個足りない')
 })
 
 // ---- エンコーダー ----

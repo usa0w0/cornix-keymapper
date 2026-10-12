@@ -23,6 +23,8 @@ interface Props {
   changed: boolean
   /** 連動して変えたキーの数（このキーを含む）。2 以上なら、「変更を取り消す」で、その数のキーがまとめて戻る */
   linked?: number
+  /** このキーを、同時に押すキーに使っているコンボの数 */
+  usedByCombos?: number
   legend: Legend
   /** 本体のレイヤー数と、選べるレイヤー切り替えの方式。動作を選ぶ部品に渡す */
   layerCount: number
@@ -43,7 +45,8 @@ const TURN_SLOTS: readonly BehaviorSlot[] = ['tap']
  * 本体から読んだ値が透過の時は、その旨だけを出す）
  */
 export function KeyEditor(props: Props) {
-  const { layer, place, behavior, view, changed, linked = 1, legend, layerCount, layerModes, onChange, onRevert } = props
+  const { layer, place, behavior, view, changed, linked = 1, usedByCombos = 0, legend, layerCount, layerModes } = props
+  const { onChange, onRevert } = props
   const [active, setActive] = useState<BehaviorSlot>('tap')
   const turn = 'encoder' in place
   const what = turn ? 'エンコーダー' : 'キー'
@@ -72,6 +75,11 @@ export function KeyEditor(props: Props) {
         <p className="edit-note">
           🔒
           この{what}の動作は、このサイトでは編集できません。内容はそのまま残ります。別の動作で上書きすることはできます（下で動作を選ぶと、この{what}の元の内容は、選んだ動作に置き換わります）。
+        </p>
+      )}
+      {usedByCombos > 0 && (
+        <p className="edit-note">
+          このキーは、コンボ {usedByCombos} 件に使われています。動作を変えると、そのコンボはこのキーでは働かなくなります。
         </p>
       )}
       {empty && (

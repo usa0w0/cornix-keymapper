@@ -123,6 +123,21 @@ const turnEditor = (action: Action, changed = false) =>
     />,
   )
 
+test('キーマップのタブ: コンボに使われているキーの編集欄に、使っているコンボの数と、変えるとどうなるかを出す', () => {
+  const combo = { layer: 0, legend: 'us', layerCount: 10, layerModes: LAYER_MODES, onChange: () => {}, onRevert: () => {} } as const
+  const view = behaviorView({ tap: A }, 'us')
+  const used = renderToStaticMarkup(
+    <KeyEditor {...combo} place={{ row: 0, col: 1 }} behavior={{ tap: A }} view={view} changed={false} usedByCombos={2} />,
+  )
+  expect(used).toContain(
+    '<p class="edit-note">このキーは、コンボ 2 件に使われています。動作を変えると、そのコンボはこのキーでは働かなくなります。</p>',
+  )
+  const unused = renderToStaticMarkup(
+    <KeyEditor {...combo} place={{ row: 0, col: 1 }} behavior={{ tap: A }} view={view} changed={false} />,
+  )
+  expect(unused).not.toContain('コンボ')
+})
+
 test('編集欄: エンコーダーは、欄が1つ（回した時）。動作を選ぶ部品には、エンコーダーに入れられる動作だけを出す', () => {
   const html = turnEditor({ kind: 'key', code: 0xaa, mods: [] }, true)
   expect(html).toContain('<h2>レイヤー 1 ・ エンコーダー 1 の左回し</h2>')

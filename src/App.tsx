@@ -3,6 +3,7 @@ import { isWebHidSupported } from './browserSupport.ts'
 import type { DeviceConnector, KeyboardDevice } from './device/types.ts'
 import { countEdits, EMPTY_SESSION, hasUnwrittenChanges, sessionReducer, type ReloadChoice } from './session/editState.ts'
 import { AppHeader } from './ui/AppHeader.tsx'
+import { ComboView } from './ui/ComboView.tsx'
 import { DeviceInfoDialog } from './ui/DeviceInfoDialog.tsx'
 import { editSlotCounts } from './ui/deviceInfo.ts'
 import { EditSessionContext } from './ui/editContext.ts'
@@ -13,6 +14,7 @@ import { ConnectStage, ReadFailedStage, ReadingStage } from './ui/Stage.tsx'
 import { UnsupportedBrowserWarning } from './ui/UnsupportedBrowserWarning.tsx'
 import { useConnection } from './ui/useConnection.ts'
 import { useDeviceRead } from './ui/useDeviceRead.ts'
+import { useLayerView } from './ui/useLayerView.ts'
 import { useLeaveConfirm } from './ui/useLeaveConfirm.ts'
 
 type Tab = 'keymap' | 'combo'
@@ -40,6 +42,8 @@ function App({ connector, supported = isWebHidSupported() }: Props) {
   const [session, dispatch] = useReducer(sessionReducer, EMPTY_SESSION)
   const store = useMemo(() => ({ session, dispatch }), [session])
   const [tab, setTab] = useState<Tab>('keymap')
+  // 開いているレイヤーと刻印は、タブを切り替えても同じものを使う
+  const shown = useLayerView()
   const info = useRef<HTMLDialogElement>(null)
   const report = reading?.status === 'done' ? reading.report : null
   const { edit, pending } = session
@@ -109,9 +113,9 @@ function App({ connector, supported = isWebHidSupported() }: Props) {
         <main>
           {edit ? (
             tab === 'keymap' ? (
-              <KeymapView state={edit} onAction={dispatch} />
+              <KeymapView state={edit} onAction={dispatch} shown={shown} />
             ) : (
-              <p className="placeholder">コンボの設定は準備中です。</p>
+              <ComboView state={edit} onAction={dispatch} shown={shown} />
             )
           ) : !device || !reading ? (
             <ConnectStage

@@ -58,7 +58,7 @@ export function SlotShortageDialog({ list, attempted, onJump, onOverwrite, onClo
                 <span>{row.name}</span>
                 {row.keys.length > 1 && <span className="plain-list-note">（{row.keys.length} つのキーが同じ枠を共有）</span>}
                 {row.others > 0 && (
-                  <span className="plain-list-note">（エンコーダーかコンボの出力 {row.others} か所からも使われています）</span>
+                  <span className="plain-list-note">（エンコーダーかコンボ {row.others} か所からも使われています）</span>
                 )}
               </li>
             ))}

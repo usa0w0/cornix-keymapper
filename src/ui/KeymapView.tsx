@@ -1,10 +1,11 @@
 import { useId, useMemo, useState } from 'react'
-import { layerModesFor, type Action, type Legend } from '../model/action.ts'
+import { layerModesFor, type Action } from '../model/action.ts'
 import type { KeyBehavior } from '../model/behavior.ts'
 import { linkedKeys, type EditPlace, type KeyPlace } from '../model/edits.ts'
 import { customKeycodesOf } from '../model/keycodes.ts'
 import { placeKeys } from '../model/layout.ts'
 import {
+  combosUsingKey,
   planKeys,
   tryEditEncoder,
   tryEditKey,
@@ -13,15 +14,15 @@ import {
   type EditState,
   type SessionAction,
 } from '../session/editState.ts'
-import { KeyboardFigure, KeyFace } from './KeyboardFigure.tsx'
+import { KeyboardFigure } from './KeyboardFigure.tsx'
 import { KeyEditor } from './KeyEditor.tsx'
-import { behaviorAt, isChanged, isLayerEmpty, keyViewOf, targetId, targetOf, type KeyTarget, type KeyView } from './keyView.ts'
+import { behaviorAt, isChanged, keyViewOf, targetId, targetOf, type KeyTarget } from './keyView.ts'
+import { KeyLegend, LayerBar } from './LayerBar.tsx'
 import { decideSharedEdit, sharedKeyList, type SharedAnswer } from './sharedKey.ts'
 import { SharedKeyDialog } from './SharedKeyDialog.tsx'
 import { SlotShortageDialog } from './SlotShortageDialog.tsx'
 import { shortageList } from './slotShortage.ts'
-
-const LEGENDS: readonly Legend[] = ['us', 'jis']
+import { useLayerView, type LayerView } from './useLayerView.ts'
 
 /** 枠が足りない時のダイアログに出すもの */
 interface Shortage {
@@ -50,18 +51,20 @@ interface Props {
   state: EditState
   /** 編集を、編集中の状態に送る */
   onAction: (action: SessionAction) => void
+  /** 開いているレイヤーと刻印。コンボのタブと同じものを使う時に渡す。省くと、この部品が持つ */
+  shown?: LayerView
 }
 
 /**
  * キーマップの表示と編集。レイヤーの行（番号、凡例を開く「?」、刻印の切り替え）、選んだレイヤーのキーボード図、
  * 図で選んだキー（か、エンコーダーの1方向）の編集欄
  */
-export function KeymapView({ state, onAction }: Props) {
+export function KeymapView({ state, onAction, shown }: Props) {
   const { source: snapshot, edits } = state
-  const [selectedLayer, setLayer] = useState(0)
+  const own = useLayerView()
+  const { layer: selectedLayer, legend, setLayer, setLegend } = shown ?? own
   // 読み直してレイヤー数が減った時に、ないレイヤーを指したままにしない
   const layer = Math.min(selectedLayer, Math.max(snapshot.keymap.length - 1, 0))
-  const [legend, setLegend] = useState<Legend>('us')
   // 選んだ場所（キーか、エンコーダーの1方向）。レイヤーを切り替えても、同じ場所を選んだままにする
   const [selectedTarget, setSelectedTarget] = useState<KeyTarget | null>(null)
   const [shortage, setShortage] = useState<Shortage | null>(null)
@@ -129,35 +132,16 @@ export function KeymapView({ state, onAction }: Props) {
 
   return (
     <section className="keymap" aria-label="キーマップ">
-      <div className="layers">
-        <span className="layers-title">レイヤー</span>
-        {snapshot.keymap.map((_, index) => (
-          <button
-            type="button"
-            key={index}
-            aria-pressed={layer === index}
-            className={isLayerEmpty(snapshot, index, keys, edits) ? 'empty' : ''}
-            onClick={() => selectLayer(index)}
-          >
-            {index}
-          </button>
-        ))}
-        <button type="button" className="help" popoverTarget={legendId} aria-label="キーの見え方">
-          ?
-        </button>
-        <span className="spacer" />
-        <span
-          className="layers-title"
-          title="パソコン側の配列の設定に合わせて、キーの字の見え方を切り替える。本体に書く内容は変わらない"
-        >
-          刻印
-        </span>
-        {LEGENDS.map((kind) => (
-          <button type="button" key={kind} aria-pressed={legend === kind} onClick={() => setLegend(kind)}>
-            {kind.toUpperCase()}
-          </button>
-        ))}
-      </div>
+      <LayerBar
+        snapshot={snapshot}
+        keys={keys}
+        edits={edits}
+        layer={layer}
+        legend={legend}
+        legendId={legendId}
+        onLayer={selectLayer}
+        onLegend={setLegend}
+      />
       {plan.missing > 0 && (
         // 読み直した内容に編集を当て直した後など、いまの編集に枠が足りなくなった時
         <p className="notice notice-row" role="alert">
@@ -188,6 +172,7 @@ export function KeymapView({ state, onAction }: Props) {
           view={viewOf(selected)}
           changed={isChanged(edits, layer, selected)}
           linked={selected.kind === 'key' ? linkedKeys(edits.keys, { layer, key: selected.index }).length : 1}
+          usedByCombos={selected.kind === 'key' ? combosUsingKey(state, { layer, key: selected.index }, plan) : 0}
           legend={legend}
           layerCount={snapshot.keymap.length}
           layerModes={layerModesFor(snapshot.capabilities.vialProtocol).modes}
@@ -241,65 +226,6 @@ export function KeymapView({ state, onAction }: Props) {
         />
       )}
       <KeyLegend id={legendId} />
-    </section>
-  )
-}
-
-const a = { short: 'A', full: 'A' }
-// コンボのキー（緑の枠）は、コンボのタブを作る時に足す
-const SAMPLES: readonly { name: string; view: KeyView; changed?: boolean; selected?: boolean }[] = [
-  { name: 'タップだけ', view: { state: 'normal', slots: { tap: a } } },
-  { name: 'タップと長押し', view: { state: 'normal', slots: { tap: a, hold: { short: 'Ctrl', full: '左 Ctrl' } } } },
-  {
-    name: '4つとも',
-    view: {
-      state: 'normal',
-      slots: {
-        tap: a,
-        hold: { short: 'Ctrl', full: '' },
-        doubleTap: { short: 'Esc', full: '' },
-        tapHold: { short: 'Shift', full: '' },
-      },
-    },
-  },
-  { name: '長押しだけ', view: { state: 'normal', slots: { hold: { short: 'レイヤー 2', note: '押している間', full: '' } } } },
-  { name: '空（何もしない）', view: { state: 'none', slots: {} } },
-  {
-    name: '透過',
-    view: {
-      state: 'transparent',
-      slots: { tap: { short: '透過', full: '透過' } },
-      inherited: { layer: 0, state: 'normal', slots: { tap: a } },
-    },
-  },
-  { name: '編集不可', view: { state: 'locked', slots: { tap: { short: 'BT0', full: 'BT0' } } } },
-  { name: '変更あり', view: { state: 'normal', slots: { tap: a } }, changed: true },
-  { name: '選択中', view: { state: 'normal', slots: { tap: a } }, selected: true },
-]
-
-/** キーの見え方の見本。レイヤーの行の「?」から開く */
-function KeyLegend({ id }: { id: string }) {
-  return (
-    <section className="legend" id={id} popover="auto" aria-label="キーの見え方">
-      <div className="legend-head">
-        <h2>キーの見え方</h2>
-        <button type="button" className="quiet" popoverTarget={id} popoverTargetAction="hide" aria-label="閉じる">
-          ×
-        </button>
-      </div>
-      <ul>
-        {SAMPLES.map(({ name, view, changed, selected }) => (
-          <li key={name}>
-            <span className={`key state-${view.state}${changed ? ' changed' : ''}${selected ? ' selected' : ''}`}>
-              <KeyFace view={view} changed={changed} />
-            </span>
-            {name}
-          </li>
-        ))}
-      </ul>
-      <p className="legend-note">
-        大きな字がタップ、「長押し」「2回」（2回タップ）「2回長」（タップ後長押し）の印が付いた小さな字が、ほかの押し方の動作です。透過のキーには、下のレイヤーで実際に効く動作を薄く出します。レイヤーの番号が薄いものは、キーが1つも割り当てられていないレイヤーです。
-      </p>
     </section>
   )
 }

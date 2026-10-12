@@ -201,11 +201,6 @@ main {
   font-weight: 600;
 }
 
-.app .placeholder {
-  padding: 2rem 0;
-  color: var(--muted);
-}
-
 /* 接続前、読み込み中、読み出しの失敗の時に、図の代わりに出す中央のカード */
 .stage {
   max-width: 34rem;
@@ -893,6 +888,127 @@ main {
 .keymap .field-box .field-clear:hover {
   background: var(--key-none);
   color: var(--text);
+}
+
+/* ---- コンボのタブ ---- */
+
+.keymap .figure .key:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.keymap .key.in-combo {
+  border-color: var(--combo);
+  background: var(--combo-soft);
+  box-shadow: 0 0 0 2px var(--combo);
+  z-index: 1;
+}
+
+.keymap .mark-combo,
+.keymap .combo-chip b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--combo);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.keymap .mark-combo {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+}
+
+/* 押す順の番号を右上に出すので、鍵の印は左上に出す */
+.keymap .key.in-combo .mark-locked {
+  right: auto;
+  left: 3px;
+}
+
+.keymap .combo-steps {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 0.6rem;
+}
+
+.keymap .field-box.combo-keys {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-height: 2.2rem;
+  padding: 0.2rem 0.5rem;
+}
+
+.keymap .field-box span.field-value {
+  padding: 0.35rem 0.75rem;
+}
+
+.keymap .combo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.45rem 0.1rem 0.2rem;
+  border: 1px solid var(--combo);
+  border-radius: 999px;
+  background: var(--combo-soft);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.keymap .combo-chip button {
+  padding: 0 0.2rem;
+  color: var(--muted);
+}
+
+.keymap .combo-list {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.keymap .combo-list li {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.keymap .combo-list .combo-row {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  text-align: left;
+}
+
+.keymap .combo-list li.shown .combo-row {
+  border-color: var(--combo);
+  box-shadow: 0 0 0 1px var(--combo);
+}
+
+.keymap .combo-arrow,
+.keymap .combo-missing {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.keymap .combo-missing {
+  flex-basis: 100%;
+}
+
+.keymap .combo-changed {
+  color: var(--changed);
+  font-size: 0.85rem;
+}
+
+.keymap .combo-refused {
+  margin-bottom: 0.6rem;
 }
 
 /* ---- 枠が足りない時のダイアログの、枠を使っているキーの一覧 ---- */
