@@ -8,16 +8,18 @@ interface Props {
   connection: ConnectionState
   /** このブラウザーで接続できるか（WebHID があるか） */
   supported: boolean
-  /** 読み出しが終わっている時の、残り枠数。読み出す前と失敗した時は null */
+  /** 読み込んだ内容がある時の、残り枠数。1回も読み出していなければ null。接続が切れても出し続ける */
   slots: { tapDance: SlotCount; combo: SlotCount } | null
+  /** 編集の数 */
+  changes: number
   onConnect: () => void
   onDisconnect: () => void
-  /** 本体の情報のダイアログを開く */
-  onDeviceInfo: () => void
+  /** 本体の情報のダイアログを開く。接続中の機器を読み終えるまでは null */
+  onDeviceInfo: (() => void) | null
 }
 
 /** ヘッダー。タイトル、接続の状態、残り枠数と、保存・書き込みのボタン */
-export function AppHeader({ connection, supported, slots, onConnect, onDisconnect, onDeviceInfo }: Props) {
+export function AppHeader({ connection, supported, slots, changes, onConnect, onDisconnect, onDeviceInfo }: Props) {
   return (
     <header className="app-header">
       <h1>
@@ -25,7 +27,7 @@ export function AppHeader({ connection, supported, slots, onConnect, onDisconnec
       </h1>
       {connection.status === 'connected' ? (
         <>
-          {slots ? (
+          {onDeviceInfo ? (
             <button type="button" className="chip chip-ok" title="接続中のキーボードの情報を見る" onClick={onDeviceInfo}>
               接続済み: {connection.device.name} ▾
             </button>
@@ -55,7 +57,7 @@ export function AppHeader({ connection, supported, slots, onConnect, onDisconnec
           <span className="slots">
             コンボ 残り <b>{slots.combo.free}</b> / {slots.combo.total}
           </span>
-          {/* ここから下の4つは置き場所だけ。中身は、バックアップと書き込みが #15、.vil が #16、変更の件数が #14 */}
+          {/* ここから下の4つは置き場所だけ。中身は、バックアップと書き込みが #15、.vil が #16。件数は、編集の数（変更点の一覧は #14） */}
           <button type="button" disabled title="準備中">
             バックアップ
           </button>
@@ -66,7 +68,7 @@ export function AppHeader({ connection, supported, slots, onConnect, onDisconnec
             .vil を読み込む
           </button>
           <button type="button" className="primary" disabled title="準備中">
-            書き込み（変更 0 件）
+            書き込み（変更 {changes} 件）
           </button>
         </>
       )}
