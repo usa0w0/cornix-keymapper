@@ -30,13 +30,19 @@ const SLOT_TAGS: Record<Slot, string> = { tap: '', hold: '長押し', doubleTap:
 
 type Selection = { kind: 'key'; index: number } | { kind: 'encoder'; encoder: number; direction: number }
 
-/** コンボ1つ。同時に押すキーは、レイヤーと位置で持つ */
+/**
+ * コンボ1つ。同時に押すキーは、位置ではなくキーの中身（動作）で持つ。
+ * 本体は「この中身のキーを同時に押したら」で判定するので、どのレイヤーでも、同じ中身のキーなら働く
+ */
 interface Combo {
   id: number
-  layer: number
-  keys: number[]
+  keys: Behavior[]
   output?: number
 }
+
+/** 2つのキーの中身が同じかを比べるための文字列 */
+const signature = (behavior: Behavior) =>
+  SLOTS.map((slot) => behavior.slots[slot] ?? '').join('/')
 
 const MAX_COMBO_KEYS = 4
 
@@ -129,7 +135,6 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
             key={index}
             aria-pressed={layer === index}
             className={keys.every((code) => code === 0 || code === 1) ? 'empty' : ''}
-            disabled={tab === 'combo' && draft !== null}
             onClick={() => {
               setLayer(index)
               setSelection(null)
@@ -160,8 +165,8 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
           combos={combos}
           draft={draft}
           remaining={snapshot.capabilities.comboCount - usedCombos}
+          behaviorAt={behaviorAt}
           viewAt={viewAt}
-          onLayer={setLayer}
           onDraft={setDraft}
           onCombos={setCombos}
         />
@@ -269,28 +274,36 @@ function ComboTab(props: {
   combos: Combo[]
   draft: Combo | null
   remaining: number
+  behaviorAt: (layer: number, target: Selection) => Behavior
   viewAt: (layer: number, target: Selection) => KeyView
-  onLayer: (layer: number) => void
   onDraft: (draft: Combo | null) => void
   onCombos: (combos: Combo[]) => void
 }) {
-  const { snapshot, legend, layer, combos, draft, remaining, viewAt, onLayer, onDraft, onCombos } = props
+  const { snapshot, legend, layer, combos, draft, remaining, behaviorAt, viewAt, onDraft, onCombos } = props
   // 一覧で選んで、図に示しているコンボ
   const [shownId, setShownId] = useState<number | null>(null)
-  const shown = draft ?? combos.find((combo) => combo.id === shownId && combo.layer === layer) ?? null
-  const keyName = (at: number, index: number) => {
-    const view = viewAt(at, { kind: 'key', index })
+  const shown = draft ?? combos.find((combo) => combo.id === shownId) ?? null
+  const keyName = (behavior: Behavior) => {
+    const view = viewBehavior(behavior, snapshot, legend)
     const main = SLOTS.find((slot) => view.slots[slot])
-    return main ? view.slots[main]!.short : '（空）'
+    const others = SLOTS.filter((slot) => slot !== main && view.slots[slot]).length
+    return main ? view.slots[main]!.short + (others > 0 ? ' ほか' : '') : '（空）'
   }
+  const orderIn = (combo: Combo | null, behavior: Behavior) =>
+    combo ? combo.keys.findIndex((key) => signature(key) === signature(behavior)) : -1
+  // いま開いているレイヤーに、同じ中身のキーがないもの
+  const layerKeys = snapshot.keymap[layer].map((_, index) => signature(behaviorAt(layer, { kind: 'key', index })))
+  const missing = (combo: Combo) => combo.keys.filter((key) => !layerKeys.includes(signature(key)))
   const isNew = draft !== null && !combos.some((combo) => combo.id === draft.id)
   const ready = draft !== null && draft.keys.length >= 2 && draft.output !== undefined
 
   const toggleKey = (target: Selection) => {
     if (!draft || target.kind !== 'key') return
-    const keys = draft.keys.includes(target.index)
-      ? draft.keys.filter((index) => index !== target.index)
-      : [...draft.keys, target.index]
+    const behavior = behaviorAt(layer, target)
+    const keys =
+      orderIn(draft, behavior) >= 0
+        ? draft.keys.filter((key) => signature(key) !== signature(behavior))
+        : [...draft.keys, behavior]
     onDraft({ ...draft, keys })
   }
   const save = () => {
@@ -309,13 +322,13 @@ function ComboTab(props: {
         viewOf={(target) => viewAt(layer, target)}
         isChanged={() => false}
         comboOrder={(index) => {
-          const order = shown?.keys.indexOf(index) ?? -1
+          const order = orderIn(shown, behaviorAt(layer, { kind: 'key', index }))
           return order >= 0 ? order : undefined
         }}
         canSelect={(target) =>
           draft === null ||
           (target.kind === 'key' &&
-          (draft.keys.includes(target.index) || draft.keys.length < MAX_COMBO_KEYS) &&
+            (orderIn(draft, behaviorAt(layer, target)) >= 0 || draft.keys.length < MAX_COMBO_KEYS) &&
             viewAt(layer, target).state !== 'none' &&
             viewAt(layer, target).state !== 'transparent')
         }
@@ -324,7 +337,7 @@ function ComboTab(props: {
       {draft ? (
         <section className="edit" aria-label="コンボの追加">
           <div className="edit-head">
-            <h2>{isNew ? 'コンボを追加' : 'コンボを変更'}（レイヤー {draft.layer} の配置で決める）</h2>
+            <h2>{isNew ? 'コンボを追加' : 'コンボを変更'}</h2>
             <button type="button" onClick={() => onDraft(null)}>
               やめる
             </button>
@@ -337,14 +350,14 @@ function ComboTab(props: {
               <span className="field-name">1. 同時に押すキー（上の図でクリック。2〜{MAX_COMBO_KEYS} 個）</span>
               <div className={`field-box combo-keys ${draft.keys.length === 0 ? 'unset' : ''}`}>
                 {draft.keys.length === 0 && <span className="picker-empty">まだ選んでいません</span>}
-                {draft.keys.map((index, order) => (
-                  <span className="combo-chip" key={index}>
+                {draft.keys.map((behavior, order) => (
+                  <span className="combo-chip" key={signature(behavior)}>
                     <b>{order + 1}</b>
-                    {keyName(draft.layer, index)}
+                    {keyName(behavior)}
                     <button
                       type="button"
                       aria-label="このキーを外す"
-                      onClick={() => onDraft({ ...draft, keys: draft.keys.filter((k) => k !== index) })}
+                      onClick={() => onDraft({ ...draft, keys: draft.keys.filter((key) => key !== behavior) })}
                     >
                       ×
                     </button>
@@ -375,11 +388,12 @@ function ComboTab(props: {
         <section className="edit" aria-label="コンボの一覧">
           <div className="edit-head">
             <h2>コンボ（複数のキーを同時に押した時の動作）</h2>
+            <span className="picker-empty">どのレイヤーでも、同じ中身のキーを同時に押せば働きます。</span>
             <button
               type="button"
               className="primary"
               disabled={remaining <= 0}
-              onClick={() => onDraft({ id: Date.now(), layer, keys: [] })}
+              onClick={() => onDraft({ id: Date.now(), keys: [] })}
             >
               コンボを追加
             </button>
@@ -396,28 +410,23 @@ function ComboTab(props: {
                     type="button"
                     className="combo-row"
                     title="図で、このコンボのキーを示す"
-                    onClick={() => {
-                      onLayer(combo.layer)
-                      setShownId(combo.id)
-                    }}
+                    onClick={() => setShownId(combo.id)}
                   >
-                    <span className="combo-layer">レイヤー {combo.layer}</span>
-                    {combo.keys.map((index, order) => (
-                      <span className="combo-chip" key={index}>
+                    {combo.keys.map((behavior, order) => (
+                      <span className="combo-chip" key={signature(behavior)}>
                         <b>{order + 1}</b>
-                        {keyName(combo.layer, index)}
+                        {keyName(behavior)}
                       </span>
                     ))}
                     <span className="combo-arrow">→</span>
                     <strong>{combo.output === undefined ? '' : labelOf(combo.output, snapshot, legend).full}</strong>
+                    {shown?.id === combo.id && missing(combo).length > 0 && (
+                      <span className="combo-missing">
+                        レイヤー {layer} には「{missing(combo).map(keyName).join('」「')}」のキーがないので、このレイヤーでは働きません
+                      </span>
+                    )}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onLayer(combo.layer)
-                      onDraft(combo)
-                    }}
-                  >
+                  <button type="button" onClick={() => onDraft(combo)}>
                     変更
                   </button>
                   <button type="button" onClick={() => onCombos(combos.filter((c) => c.id !== combo.id))}>

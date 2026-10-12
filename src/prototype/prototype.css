@@ -782,8 +782,12 @@
   box-shadow: 0 0 0 1px var(--combo);
 }
 
-.proto .combo-layer,
-.proto .combo-arrow {
+.proto .combo-arrow,
+.proto .combo-missing {
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+.proto .combo-missing {
+  flex-basis: 100%;
 }
