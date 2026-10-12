@@ -28,7 +28,7 @@ import {
   type KeyEdit,
   type KeyPlace,
 } from '../model/edits.ts'
-import { customKeycodesOf, keycodeToAction, type CustomKeycode } from '../model/keycodes.ts'
+import { customKeycodesOf, KC_TRANSPARENT, keycodeToAction, type CustomKeycode } from '../model/keycodes.ts'
 
 export interface EditState {
   /** 基準: 本体から読んだもの。変更点の一覧を作る相手 */
@@ -306,7 +306,9 @@ export function comboKeyAt(state: EditState, place: KeyPlace): ComboKey | undefi
   if (!edit) return keycode
   const encoded = encodeBehavior(edit.behavior)
   if (!encoded) return undefined
-  return encoded.feature === 'tapDance' ? { tapDance: encoded.fields } : encoded.keycode
+  if (encoded.feature === 'tapDance') return { tapDance: encoded.fields }
+  // 欄をすべて消したキーは、空のキー
+  return encoded.keycode === 0 || encoded.keycode === KC_TRANSPARENT ? undefined : encoded.keycode
 }
 
 /** 一覧に出すコンボ1つ */

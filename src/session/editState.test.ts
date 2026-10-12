@@ -210,6 +210,8 @@ test('コンボのキーにする時の持ち方: 編集したキーは、枠を
   expect(comboKeyAt(state, { layer: 0, key: 2 })).toBe(0x2104)
   expect(comboKeyAt(state, { layer: 0, key: 3 })).toEqual({ tapDance: { onTap: 0x04, onHold: 0, onDoubleTap: 0x29, onTapHold: 0 } })
   expect(comboKeyAt(state, { layer: 0, key: 4 })).toBeUndefined()
+  // 欄をすべて消したキーも、空のキー
+  expect(comboKeyAt(editKey(state, 0, 5, {}), { layer: 0, key: 5 })).toBeUndefined()
 })
 
 test('コンボの一覧: 本体に入っているコンボ（枠の番号順）の後に、足したコンボ。消したコンボと空の枠は出さない', () => {
