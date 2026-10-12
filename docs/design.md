@@ -70,6 +70,7 @@ src/
   model/             純粋なロジック（React にも WebHID にも依存しない）
     keycodes.ts      Vial のキーコード（数値・名前）と動作（Action）の相互変換
     action.ts        動作の型と分類・日本語の表示名・検索
+    layout.ts        レイアウト定義（KLE 形式）から、キーとエンコーダーの位置を取り出す
     behavior.ts      キーの動作（4欄）の型
     decode.ts        本体の設定 → キーの動作
     encode.ts        キーの動作 → 本体の設定（機能の自動判定、枠の割り当て）
@@ -446,7 +447,7 @@ Vial のコンボは、キーの位置ではなくキーコードの組（最大
 
 ### 色、文字、余白
 
-値は `src/prototype/prototype.css` の先頭の変数を正とする。明るい表示と暗い表示（OS の設定に従う）の両方を持つ。
+値は `src/prototype/prototype.css` の先頭の変数を正とする。明るい表示と暗い表示（OS の設定に従う）の両方を持つ。本実装は、同じ値を `src/index.css` の `:root` に CSS の変数として持つ。
 
 | 用途 | 明るい表示 | 暗い表示 |
 | --- | --- | --- |
