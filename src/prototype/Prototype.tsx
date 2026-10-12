@@ -1,8 +1,21 @@
-// 画面デザインの試作（#22）。偽の機器のデータを表示するだけで、編集や書き込みはまだ動かない
+// 画面デザインの試作（#22）。偽の機器のデータを表示し、編集は画面の中だけで行う（書き込みはしない）
 import { useMemo, useState } from 'react'
 import type { KeyboardSnapshot } from '../device/types.ts'
 import { bounds, placeKeys, type PlacedKey } from './kle.ts'
-import { SLOT_NAMES, viewKey, viewKeyAt, type KeyView, type Legend, type Slot } from './labels.ts'
+import {
+  behaviorOf,
+  CATEGORIES,
+  inheritedView,
+  labelOf,
+  LAYER_MODE_CHOICES,
+  SHORTCUT_KEYS,
+  SLOT_NAMES,
+  viewBehavior,
+  type Behavior,
+  type KeyView,
+  type Legend,
+  type Slot,
+} from './labels.ts'
 import './prototype.css'
 
 const UNIT = 64
@@ -12,6 +25,9 @@ const SLOTS: Slot[] = ['tap', 'hold', 'doubleTap', 'tapHold']
 const SLOT_TAGS: Record<Slot, string> = { tap: '', hold: '長押し', doubleTap: '2回', tapHold: '2回長' }
 
 type Selection = { kind: 'key'; index: number } | { kind: 'encoder'; encoder: number; direction: number }
+
+const editKey = (layer: number, target: Selection) =>
+  target.kind === 'key' ? `${layer}:k${target.index}` : `${layer}:e${target.encoder}-${target.direction}`
 
 export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
   const [tab, setTab] = useState<'keymap' | 'combo'>('keymap')
@@ -24,9 +40,30 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
   const [legend, setLegend] = useState<Legend>(() =>
     new URLSearchParams(location.search).get('legend') === 'jis' ? 'jis' : 'us',
   )
-  const { cols } = snapshot.layout
+  // 画面の中だけの編集。キーごとに、編集後の動作を持つ
+  const [edits, setEdits] = useState<Record<string, Behavior>>({})
   const usedTapDances = snapshot.tapDances.filter((t) => t.onTap || t.onHold || t.onDoubleTap || t.onTapHold).length
   const usedCombos = snapshot.combos.filter((c) => c.output !== 0).length
+  const changes = Object.keys(edits).length
+
+  const behaviorAt = (at: number, target: Selection): Behavior =>
+    edits[editKey(at, target)] ??
+    behaviorOf(
+      target.kind === 'key' ? snapshot.keymap[at][target.index] : snapshot.encoders[at][target.encoder][target.direction],
+      snapshot,
+    )
+  const viewAt = (at: number, target: Selection): KeyView => {
+    const view = viewBehavior(behaviorAt(at, target), snapshot, legend)
+    if (view.state !== 'transparent' || target.kind !== 'key') return view
+    return { ...view, inherited: inheritedView((below) => behaviorAt(below, target), at, snapshot, legend) }
+  }
+  const setBehavior = (target: Selection, behavior: Behavior | null) =>
+    setEdits((current) => {
+      const next = { ...current }
+      if (behavior) next[editKey(layer, target)] = behavior
+      else delete next[editKey(layer, target)]
+      return next
+    })
 
   return (
     <div className="proto">
@@ -43,8 +80,8 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
         </span>
         <button type="button">.vil に保存</button>
         <button type="button">.vil を読み込む</button>
-        <button type="button" className="primary" disabled>
-          書き込み（変更 0 件）
+        <button type="button" className="primary" disabled={changes === 0}>
+          書き込み（変更 {changes} 件）
         </button>
       </header>
 
@@ -91,9 +128,31 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
             ))}
           </div>
 
-          <KeyboardFigure snapshot={snapshot} layer={layer} legend={legend} selection={selection} onSelect={setSelection} />
+          <KeyboardFigure
+            snapshot={snapshot}
+            selection={selection}
+            onSelect={setSelection}
+            viewOf={(target) => viewAt(layer, target)}
+            isChanged={(target) => editKey(layer, target) in edits}
+          />
 
-          <EditPanel snapshot={snapshot} layer={layer} legend={legend} selection={selection} cols={cols} />
+          {selection ? (
+            <EditPanel
+              key={editKey(layer, selection)}
+              snapshot={snapshot}
+              layer={layer}
+              legend={legend}
+              selection={selection}
+              behavior={behaviorAt(layer, selection)}
+              view={viewAt(layer, selection)}
+              changed={editKey(layer, selection) in edits}
+              onChange={(behavior) => setBehavior(selection, behavior)}
+            />
+          ) : (
+            <section className="edit" aria-label="選んだキー">
+              <p className="edit-empty">キーをクリックすると、ここで動作を変えられます。</p>
+            </section>
+          )}
           <Legend />
         </>
       )}
@@ -103,12 +162,12 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
 
 function KeyboardFigure(props: {
   snapshot: KeyboardSnapshot
-  layer: number
-  legend: Legend
   selection: Selection | null
   onSelect: (selection: Selection) => void
+  viewOf: (target: Selection) => KeyView
+  isChanged: (target: Selection) => boolean
 }) {
-  const { snapshot, layer, legend, selection, onSelect } = props
+  const { snapshot, selection, onSelect, viewOf, isChanged } = props
   const keys = useMemo(
     () => placeKeys((snapshot.layout.raw as { layouts?: { keymap?: unknown } }).layouts?.keymap),
     [snapshot],
@@ -127,36 +186,28 @@ function KeyboardFigure(props: {
     <div className="figure-scroll">
       <div className="figure" style={{ width: (box.maxX - box.minX) * UNIT, height: (box.maxY - box.minY) * UNIT }}>
         {keys.map((key) => {
-          if (key.kind === 'encoder') {
-            const code = snapshot.encoders[layer][key.encoder]?.[key.direction] ?? 0
-            const selected =
-              selection?.kind === 'encoder' && selection.encoder === key.encoder && selection.direction === key.direction
-            return (
-              <button
-                type="button"
-                key={`e${key.encoder}-${key.direction}`}
-                className={`key encoder ${key.direction === 0 ? 'encoder-left' : 'encoder-right'}`}
-                aria-pressed={selected}
-                style={place(key)}
-                onClick={() => onSelect({ kind: 'encoder', encoder: key.encoder, direction: key.direction })}
-              >
-                <span className="encoder-turn">{key.direction === 0 ? '↺ 左回し' : '右回し ↻'}</span>
-                <KeyFace view={viewKey(code, snapshot, legend)} />
-              </button>
-            )
-          }
-          const index = key.row * snapshot.layout.cols + key.col
-          const view = viewKeyAt(snapshot, layer, index, legend)
+          const target: Selection =
+            key.kind === 'encoder'
+              ? { kind: 'encoder', encoder: key.encoder, direction: key.direction }
+              : { kind: 'key', index: key.row * snapshot.layout.cols + key.col }
+          const view = viewOf(target)
+          const changed = isChanged(target)
+          const selected = selection !== null && editKey(0, selection) === editKey(0, target)
+          const shape =
+            key.kind === 'encoder' ? `encoder ${key.direction === 0 ? 'encoder-left' : 'encoder-right'}` : ''
           return (
             <button
               type="button"
-              key={index}
-              className={`key state-${view.state}`}
-              aria-pressed={selection?.kind === 'key' && selection.index === index}
+              key={editKey(0, target)}
+              className={`key state-${view.state} ${shape} ${changed ? 'changed' : ''}`}
+              aria-pressed={selected}
               style={place(key)}
-              onClick={() => onSelect({ kind: 'key', index })}
+              onClick={() => onSelect(target)}
             >
-              <KeyFace view={view} />
+              {key.kind === 'encoder' && (
+                <span className="encoder-turn">{key.direction === 0 ? '↺ 左回し' : '右回し ↻'}</span>
+              )}
+              <KeyFace view={view} changed={changed} />
             </button>
           )
         })}
@@ -207,37 +258,44 @@ function EditPanel(props: {
   snapshot: KeyboardSnapshot
   layer: number
   legend: Legend
-  selection: Selection | null
-  cols: number
+  selection: Selection
+  behavior: Behavior
+  view: KeyView
+  changed: boolean
+  onChange: (behavior: Behavior | null) => void
 }) {
-  const { snapshot, layer, legend, selection, cols } = props
-  if (!selection) {
-    return (
-      <section className="edit" aria-label="選んだキー">
-        <p className="edit-empty">キーをクリックすると、ここで動作を変えられます。</p>
-      </section>
-    )
+  const { snapshot, layer, legend, selection, behavior, view, changed, onChange } = props
+  const isEncoder = selection.kind === 'encoder'
+  const [active, setActive] = useState<Slot>('tap')
+  const { cols } = snapshot.layout
+
+  const pick = (code: number) =>
+    onChange({ state: 'normal', slots: { ...(behavior.state === 'normal' ? behavior.slots : {}), [active]: code } })
+  const clear = (slot: Slot) => {
+    const rest = { ...behavior.slots }
+    delete rest[slot]
+    onChange(Object.keys(rest).length > 0 ? { state: 'normal', slots: rest } : { state: 'none', slots: {} })
   }
-  if (selection.kind === 'encoder') {
-    const code = snapshot.encoders[layer][selection.encoder][selection.direction]
-    const view = viewKey(code, snapshot, legend)
-    return (
-      <section className="edit" aria-label="選んだキー">
-        <h2>
-          レイヤー {layer} ・ エンコーダー {selection.encoder + 1} の{selection.direction === 0 ? '左回し' : '右回し'}
-        </h2>
-        <div className="fields fields-one">
-          <Field name="回した時" value={view.slots.tap?.full ?? view.slots.hold?.full} />
-        </div>
-      </section>
-    )
-  }
-  const view = viewKeyAt(snapshot, layer, selection.index, legend)
+  const emptyName = behavior.state === 'transparent' ? '透過' : '何もしない'
+
   return (
     <section className="edit" aria-label="選んだキー">
-      <h2>
-        レイヤー {layer} ・ 行 {Math.floor(selection.index / cols)} 列 {selection.index % cols} のキー
-      </h2>
+      <div className="edit-head">
+        <span className={`key state-${view.state} ${changed ? 'changed' : ''}`}>
+          <KeyFace view={view} changed={changed} />
+        </span>
+        <h2>
+          レイヤー {layer} ・{' '}
+          {selection.kind === 'encoder'
+            ? `エンコーダー ${selection.encoder + 1} の${selection.direction === 0 ? '左回し' : '右回し'}`
+            : `行 ${Math.floor(selection.index / cols)} 列 ${selection.index % cols} のキー`}
+        </h2>
+        {changed && (
+          <button type="button" onClick={() => onChange(null)}>
+            変更を取り消す
+          </button>
+        )}
+      </div>
       {view.state === 'locked' && (
         <p className="edit-note">
           🔒 このキーの動作は、このサイトでは編集できません。内容はそのまま残ります。別の動作で上書きすることはできます。
@@ -248,31 +306,180 @@ function EditPanel(props: {
           透過のキーです。下のレイヤーの動作（{view.inherited?.slots.tap?.full ?? '何もしない'}）がそのまま効きます。
         </p>
       )}
-      <div className="fields">
-        {SLOTS.map((slot) => (
-          <Field
-            key={slot}
-            name={SLOT_NAMES[slot]}
-            value={view.slots[slot]?.full}
-            placeholder={slot === 'tap' && view.state !== 'normal' ? (view.state === 'transparent' ? '透過' : '何もしない') : undefined}
-          />
-        ))}
+      <div className={`fields ${isEncoder ? 'fields-one' : ''}`}>
+        {(isEncoder ? (['tap'] as Slot[]) : SLOTS).map((slot) => {
+          const label = view.slots[slot]
+          const isEmptyTap = slot === 'tap' && behavior.state !== 'normal'
+          return (
+            <div className="field" key={slot}>
+              <span className="field-name">{isEncoder ? '回した時' : SLOT_NAMES[slot]}</span>
+              <button
+                type="button"
+                className={`field-value ${label ? '' : 'unset'}`}
+                aria-pressed={active === slot}
+                onClick={() => setActive(slot)}
+              >
+                {label?.full ?? (isEmptyTap ? emptyName : '（なし）')}
+              </button>
+              {label && (
+                <button type="button" className="quiet" aria-label={`${SLOT_NAMES[slot]}を消す`} onClick={() => clear(slot)}>
+                  ×
+                </button>
+              )}
+            </div>
+          )
+        })}
       </div>
+      <ActionPicker
+        snapshot={snapshot}
+        legend={legend}
+        slot={active}
+        slotName={isEncoder ? '回した時' : SLOT_NAMES[active]}
+        layerCount={snapshot.keymap.length}
+        current={behavior.slots[active]}
+        onPick={pick}
+        onPickEmpty={(state) => onChange({ state, slots: {} })}
+      />
     </section>
   )
 }
 
-function Field({ name, value, placeholder }: { name: string; value?: string; placeholder?: string }) {
-  return (
-    <div className="field">
-      <span className="field-name">{name}</span>
-      <button type="button" className={`field-value ${value ? '' : 'unset'}`}>
-        {value ?? placeholder ?? '（なし）'}
+/** 動作を選ぶ部品。分類のタブと、名前での検索 */
+function ActionPicker(props: {
+  snapshot: KeyboardSnapshot
+  legend: Legend
+  slot: Slot
+  slotName: string
+  layerCount: number
+  current?: number
+  onPick: (code: number) => void
+  onPickEmpty: (state: 'none' | 'transparent') => void
+}) {
+  const { snapshot, legend, slot, slotName, layerCount, current, onPick, onPickEmpty } = props
+  const [category, setCategory] = useState('letters')
+  const [query, setQuery] = useState('')
+  const [mods, setMods] = useState(0)
+  const [mode, setMode] = useState(0x5260)
+  const tabs = [
+    ...CATEGORIES.slice(0, 4).map(({ id, name }) => ({ id, name })),
+    { id: 'shortcut', name: 'ショートカット' },
+    { id: 'layer', name: 'レイヤー切り替え' },
+    ...CATEGORIES.slice(4).map(({ id, name }) => ({ id, name })),
+    // 「透過」と「何もしない」は、タップの欄にだけ入れられる
+    ...(slot === 'tap' ? [{ id: 'empty', name: '何もしない・透過' }] : []),
+  ]
+  const shown = tabs.some((t) => t.id === category) ? category : 'letters'
+  // 「押している間だけ」は、長押しの欄とタップ後長押しの欄にだけ入れられる
+  const modes = LAYER_MODE_CHOICES.filter((choice) => choice.momentary === (slot === 'hold' || slot === 'tapHold'))
+  const shownMode = modes.some((choice) => choice.base === mode) ? mode : modes[0].base
+
+  const chip = (code: number, useFull = false) => {
+    const label = labelOf(code, snapshot, legend)
+    return (
+      <button type="button" key={code} className="chip-key" aria-pressed={current === code} title={label.full} onClick={() => onPick(code)}>
+        {useFull ? label.full : label.short}
       </button>
-      {value && (
-        <button type="button" className="quiet" aria-label={`${name}を消す`}>
-          ×
-        </button>
+    )
+  }
+  const needle = query.trim().toLowerCase()
+  const found = needle
+    ? [...new Set(CATEGORIES.flatMap((c) => c.codes))].filter((code) => {
+        const label = labelOf(code, snapshot, legend)
+        return label.short.toLowerCase().includes(needle) || label.full.toLowerCase().includes(needle)
+      })
+    : []
+
+  return (
+    <div className="picker">
+      <div className="picker-bar">
+        <span className="picker-title">「{slotName}」に入れる動作</span>
+        <input
+          type="search"
+          placeholder="名前で検索（例: enter、音量）"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </div>
+      {needle ? (
+        <div className="chips">
+          {found.length > 0 ? found.map((code) => chip(code, true)) : <span className="picker-empty">見つかりません。</span>}
+        </div>
+      ) : (
+        <>
+          <div className="picker-tabs">
+            {tabs.map((t) => (
+              <button type="button" key={t.id} aria-pressed={shown === t.id} onClick={() => setCategory(t.id)}>
+                {t.name}
+              </button>
+            ))}
+          </div>
+          {shown === 'shortcut' ? (
+            <>
+              <div className="picker-row">
+                <span>一緒に押す修飾キー</span>
+                {['Ctrl', 'Shift', 'Alt', 'GUI'].map((name, bit) => (
+                  <button type="button" key={name} aria-pressed={(mods & (1 << bit)) !== 0} onClick={() => setMods(mods ^ (1 << bit))}>
+                    {name}
+                  </button>
+                ))}
+                {mods === 0 && <span className="picker-empty">修飾キーを1つ以上選んでから、下のキーを選びます。</span>}
+              </div>
+              <div className="chips">
+                {SHORTCUT_KEYS.map((code) => (
+                  <button
+                    type="button"
+                    key={code}
+                    className="chip-key"
+                    disabled={mods === 0}
+                    aria-pressed={current === ((mods << 8) | code)}
+                    onClick={() => onPick((mods << 8) | code)}
+                  >
+                    {labelOf(code, snapshot, legend).short}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : shown === 'layer' ? (
+            <>
+              <div className="picker-row">
+                <span>切り替え方</span>
+                {modes.map((choice) => (
+                  <button type="button" key={choice.base} aria-pressed={shownMode === choice.base} onClick={() => setMode(choice.base)}>
+                    {choice.name}
+                  </button>
+                ))}
+              </div>
+              <div className="picker-row">
+                <span>切り替え先</span>
+                {Array.from({ length: layerCount }, (_, n) => (
+                  <button
+                    type="button"
+                    key={n}
+                    className="chip-key"
+                    aria-pressed={current === shownMode + n}
+                    onClick={() => onPick(shownMode + n)}
+                  >
+                    レイヤー {n}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : shown === 'empty' ? (
+            <div className="picker-row">
+              <button type="button" className="chip-key" onClick={() => onPickEmpty('none')}>
+                何もしない
+              </button>
+              <button type="button" className="chip-key" onClick={() => onPickEmpty('transparent')}>
+                透過（下のレイヤーの動作がそのまま効く）
+              </button>
+              <span className="picker-empty">どちらも、ほかの欄（長押しなど）とは組み合わせられません。</span>
+            </div>
+          ) : (
+            <div className="chips">
+              {CATEGORIES.find((c) => c.id === shown)!.codes.map((code) => chip(code, shown !== 'letters' && shown !== 'symbols'))}
+            </div>
+          )}
+        </>
       )}
     </div>
   )

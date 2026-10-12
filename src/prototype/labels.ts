@@ -95,58 +95,75 @@ function layerAction(code: number): Label | undefined {
   }
 }
 
-export function viewKey(code: number, snapshot: KeyboardSnapshot, legend: Legend = 'us'): KeyView {
-  if (code === 0) return { state: 'none', slots: {} }
-  if (code === 1) return { state: 'transparent', slots: {} }
+/** キー1つの動作を、欄ごとのキーコードで持つ（試作用の簡単な形。本実装では model/behavior.ts） */
+export interface Behavior {
+  state: 'normal' | 'none' | 'transparent'
+  slots: Partial<Record<Slot, number>>
+}
+
+const isMomentary = (code: number) => code >= 0x5220 && code < 0x5240
+const isUnsupported = (code: number) => code >= 0x2000 && !layerAction(code)
+
+/** 動作1つの表示。修飾キー付きのキー（ショートカット）とレイヤー切替を含む */
+export function labelOf(code: number, snapshot: KeyboardSnapshot, legend: Legend): Label {
   const layer = layerAction(code)
-  // 長押しだけのレイヤー切替（MO）は「長押し」の欄、それ以外は「タップ」の欄
-  if (layer) return { state: 'normal', slots: code >= 0x5220 && code < 0x5240 ? { hold: layer } : { tap: layer } }
-  if (code < 0x0100) return { state: 'normal', slots: { tap: basic(code, legend) } }
+  if (layer) return layer
+  if (code < 0x0100) return basic(code, legend)
   if (code < 0x2000) {
     const mods = modifierNames((code >> 8) & 0x0f)
-    const key = code & 0xff
-    const shifted = basic(key, legend).shifted
-    if (mods.length === 1 && mods[0] === 'Shift' && shifted) {
-      return { state: 'normal', slots: { tap: { short: shifted, full: `${shifted}（Shift + ${basic(key, legend).full}）` } } }
+    const key = basic(code & 0xff, legend)
+    if (mods.length === 1 && mods[0] === 'Shift' && key.shifted) {
+      return { short: key.shifted, full: `${key.shifted}（Shift + ${key.full}）` }
     }
-    const name = [...mods, basic(key, legend).short].join('+')
-    return { state: 'normal', slots: { tap: { short: name, full: [...mods, basic(key, legend).full].join(' + ') } } }
-  }
-  if (code >= 0x2000 && code < 0x4000) {
-    const mods = modifierNames((code >> 8) & 0x0f)
-    return { state: 'normal', slots: { tap: basic(code & 0xff, legend), hold: { short: mods.join('+'), full: mods.join(' + ') } } }
-  }
-  if (code >= 0x4000 && code < 0x5000) {
-    const n = (code >> 8) & 0x0f
-    return {
-      state: 'normal',
-      slots: { tap: basic(code & 0xff, legend), hold: { short: `レイヤー ${n}`, note: '押している間', full: `押している間だけレイヤー ${n}` } },
-    }
-  }
-  if (code >= 0x5700 && code < 0x5800) {
-    const entry = snapshot.tapDances[code - 0x5700]
-    if (!entry) return { state: 'locked', slots: { tap: { short: hex(code), full: `キーコード ${hex(code)}` } } }
-    const slots: KeyView['slots'] = {}
-    for (const [slot, value] of [
-      ['tap', entry.onTap],
-      ['hold', entry.onHold],
-      ['doubleTap', entry.onDoubleTap],
-      ['tapHold', entry.onTapHold],
-    ] as const) {
-      if (value === 0) continue
-      const inner = viewKey(value, snapshot, legend)
-      slots[slot] = inner.slots.tap ?? inner.slots.hold
-    }
-    return { state: 'normal', slots }
+    return { short: [...mods, key.short].join('+'), full: [...mods, key.full].join(' + ') }
   }
   if (code >= 0x7e00 && code < 0x7e20) {
     const custom = customKeycodes(snapshot)[code - 0x7e00]
-    return {
-      state: 'locked',
-      slots: { tap: { short: custom?.name ?? hex(code), full: custom?.title ?? `キーコード ${hex(code)}` } },
-    }
+    return { short: custom?.name ?? hex(code), full: custom?.title ?? `キーコード ${hex(code)}` }
   }
-  return { state: 'locked', slots: { tap: { short: hex(code), full: `キーコード ${hex(code)}` } } }
+  return { short: hex(code), full: `キーコード ${hex(code)}` }
+}
+
+/** 本体のキーコード1つを、欄ごとの動作に分ける（MT、LT、Tap Dance をほどく） */
+export function behaviorOf(code: number, snapshot: KeyboardSnapshot): Behavior {
+  if (code === 0) return { state: 'none', slots: {} }
+  if (code === 1) return { state: 'transparent', slots: {} }
+  // 長押しだけのレイヤー切替（MO）は「長押し」の欄
+  if (isMomentary(code)) return { state: 'normal', slots: { hold: code } }
+  if (code >= 0x2000 && code < 0x4000) {
+    // 修飾キーが複数の MT は、試作では最初の1つだけを出す
+    const bits = (code >> 8) & 0x0f
+    const right = (code >> 8) & 0x10 ? 4 : 0
+    const index = [0, 1, 2, 3].find((i) => bits & (1 << i)) ?? 0
+    return { state: 'normal', slots: { tap: code & 0xff, hold: 224 + index + right } }
+  }
+  if (code >= 0x4000 && code < 0x5000) {
+    return { state: 'normal', slots: { tap: code & 0xff, hold: 0x5220 + ((code >> 8) & 0x0f) } }
+  }
+  const entry = code >= 0x5700 && code < 0x5800 ? snapshot.tapDances[code - 0x5700] : undefined
+  if (entry) {
+    const slots: Behavior['slots'] = {}
+    if (entry.onTap) slots.tap = entry.onTap
+    if (entry.onHold) slots.hold = entry.onHold
+    if (entry.onDoubleTap) slots.doubleTap = entry.onDoubleTap
+    if (entry.onTapHold) slots.tapHold = entry.onTapHold
+    return { state: 'normal', slots }
+  }
+  return { state: 'normal', slots: { tap: code } }
+}
+
+export function viewBehavior(behavior: Behavior, snapshot: KeyboardSnapshot, legend: Legend): KeyView {
+  const slots: KeyView['slots'] = {}
+  for (const [slot, code] of Object.entries(behavior.slots) as [Slot, number][]) {
+    slots[slot] = labelOf(code, snapshot, legend)
+  }
+  const { tap, ...others } = behavior.slots
+  const locked = tap !== undefined && isUnsupported(tap) && Object.keys(others).length === 0
+  return { state: locked ? 'locked' : behavior.state, slots }
+}
+
+export function viewKey(code: number, snapshot: KeyboardSnapshot, legend: Legend = 'us'): KeyView {
+  return viewBehavior(behaviorOf(code, snapshot), snapshot, legend)
 }
 
 function customKeycodes(snapshot: KeyboardSnapshot): { name?: string; title?: string }[] {
@@ -154,13 +171,43 @@ function customKeycodes(snapshot: KeyboardSnapshot): { name?: string; title?: st
   return raw.customKeycodes ?? []
 }
 
-/** 透過キーに、下のレイヤーで実際に効く動作を添える */
-export function viewKeyAt(snapshot: KeyboardSnapshot, layer: number, key: number, legend: Legend = 'us'): KeyView {
-  const view = viewKey(snapshot.keymap[layer][key], snapshot, legend)
-  if (view.state !== 'transparent') return view
+/** 動作を選ぶ部品に並べる候補。キーコードで持ち、表示は labelOf で作る */
+export interface Category {
+  id: string
+  name: string
+  codes: number[]
+}
+
+const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i)
+const SYMBOL_KEYS = [45, 46, 47, 48, 49, 51, 52, 53, 54, 55, 56]
+
+export const CATEGORIES: Category[] = [
+  { id: 'letters', name: '文字・数字', codes: [...range(4, 29), ...range(30, 39)] },
+  { id: 'symbols', name: '記号', codes: [...SYMBOL_KEYS, ...[...range(30, 39), ...SYMBOL_KEYS].map((code) => 0x0200 | code)] },
+  { id: 'edit', name: '入力・移動', codes: [40, 41, 42, 43, 44, 76, 145, 144, 80, 81, 82, 79, 74, 77, 75, 78, 73, 57, ...range(58, 69)] },
+  { id: 'mods', name: '修飾キー', codes: range(224, 231) },
+  { id: 'media', name: 'メディア・その他', codes: [168, 170, 169, 217, 218, 211, 70] },
+]
+
+/** ショートカットで、修飾キーと組み合わせるキーの候補 */
+export const SHORTCUT_KEYS = [...range(4, 29), ...range(30, 39), 40, 41, 42, 43, 44, 76, 80, 81, 82, 79, ...range(58, 69)]
+
+export const LAYER_MODE_CHOICES: { base: number; name: string; momentary: boolean }[] = [
+  { base: 0x5220, name: '押している間だけ', momentary: true },
+  { base: 0x5260, name: '押すたびにオン・オフ', momentary: false },
+  { base: 0x5200, name: 'そのレイヤーに移動', momentary: false },
+  { base: 0x5280, name: '次の1キーだけ', momentary: false },
+]
+
+/** 透過キーで実際に効く、下のレイヤーの動作。behaviorAt は、編集を反映した後の動作を返す */
+export function inheritedView(
+  behaviorAt: (layer: number) => Behavior,
+  layer: number,
+  snapshot: KeyboardSnapshot,
+  legend: Legend,
+): KeyView | undefined {
   for (let below = layer - 1; below >= 0; below--) {
-    const lower = viewKey(snapshot.keymap[below][key], snapshot, legend)
-    if (lower.state !== 'transparent') return { ...view, inherited: lower }
+    const lower = behaviorAt(below)
+    if (lower.state !== 'transparent') return viewBehavior(lower, snapshot, legend)
   }
-  return view
 }
