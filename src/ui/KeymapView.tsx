@@ -1,12 +1,22 @@
 import { useId, useMemo, useState } from 'react'
 import { layerModesFor, type Legend } from '../model/action.ts'
 import type { KeyBehavior } from '../model/behavior.ts'
+import { linkedKeys, type KeyPlace } from '../model/edits.ts'
 import { customKeycodesOf } from '../model/keycodes.ts'
 import { placeKeys } from '../model/layout.ts'
-import { planKeys, tryEditKey, tryRevertEdit, type EditState, type SessionAction } from '../session/editState.ts'
+import {
+  planKeys,
+  tryEditKey,
+  tryEditKeysTogether,
+  tryRevertEdit,
+  type EditState,
+  type SessionAction,
+} from '../session/editState.ts'
 import { KeyboardFigure, KeyFace } from './KeyboardFigure.tsx'
 import { KeyEditor } from './KeyEditor.tsx'
 import { behaviorAt, isChanged, isLayerEmpty, keyViewOf, type KeyTarget, type KeyView } from './keyView.ts'
+import { decideSharedEdit, sharedKeyList, type SharedAnswer } from './sharedKey.ts'
+import { SharedKeyDialog } from './SharedKeyDialog.tsx'
 import { SlotShortageDialog } from './SlotShortageDialog.tsx'
 import { shortageList } from './slotShortage.ts'
 
@@ -17,7 +27,21 @@ interface Shortage {
   /** 止めた編集があるか。なければ、いまの状態で枠が足りないことを見せているだけ */
   attempted: boolean
   /** 使われていない枠を上書きすれば行える、止めた編集 */
-  overwrite?: { layer: number; key: number; behavior: KeyBehavior }
+  overwrite?: KeyChange
+}
+
+/** キーの編集1回。together があれば、そのキー（place を含む）を連動して変える。なければ、place だけを変える */
+interface KeyChange {
+  place: KeyPlace
+  behavior: KeyBehavior
+  together: KeyPlace[] | null
+}
+
+/** 共有中のキーを変える前の確認。keys は、同じ枠を指しているキー（place を含む） */
+interface SharedConfirm {
+  place: KeyPlace
+  behavior: KeyBehavior
+  keys: KeyPlace[]
 }
 
 interface Props {
@@ -40,6 +64,9 @@ export function KeymapView({ state, onAction }: Props) {
   // 選んだキーの番号。レイヤーを切り替えても、同じ場所を選んだままにする
   const [selectedKey, setSelectedKey] = useState<number | null>(null)
   const [shortage, setShortage] = useState<Shortage | null>(null)
+  const [confirm, setConfirm] = useState<SharedConfirm | null>(null)
+  // 共有中のキーの確認への答え。そのキーを選んでいる間だけ覚える（欄を1つ変えるたびに、確認を出さないため）
+  const [answer, setAnswer] = useState<SharedAnswer | null>(null)
   const legendId = useId()
   const keys = useMemo(() => placeKeys(snapshot.layout), [snapshot.layout])
   const custom = useMemo(() => customKeycodesOf(snapshot.layout), [snapshot.layout])
@@ -50,18 +77,47 @@ export function KeymapView({ state, onAction }: Props) {
   const viewOf = (target: KeyTarget) => keyViewOf(snapshot, layer, target, legend, custom, edits)
   const behavior = selected && behaviorAt(snapshot, layer, selected, custom, edits)
 
+  // キーとレイヤーを選び直したら、共有中のキーの確認への答えを忘れる
+  const selectLayer = (index: number) => {
+    setLayer(index)
+    setAnswer(null)
+  }
+  const selectKey = (key: number) => {
+    setSelectedKey(key)
+    setAnswer(null)
+  }
+
+  const send = ({ place, behavior, together }: KeyChange, overwriteUnused?: boolean) => {
+    onAction(
+      together
+        ? { type: 'editKeysTogether', keys: together, behavior, overwriteUnused }
+        : { type: 'editKey', ...place, behavior, overwriteUnused },
+    )
+    setAnswer({ ...place, source: snapshot, together })
+  }
   // 枠が足りなくなる編集は、状態に反映する前に止めて、理由と、枠を使っているキーを見せる
-  const change = (key: number, next: KeyBehavior) => {
-    const { blocked } = tryEditKey(state, layer, key, next)
-    if (!blocked) return onAction({ type: 'editKey', layer, key, behavior: next })
+  const apply = (change: KeyChange) => {
+    const { place, behavior, together } = change
+    const { blocked } = together
+      ? tryEditKeysTogether(state, together, behavior)
+      : tryEditKey(state, place.layer, place.key, behavior)
+    if (!blocked) return send(change)
     const canOverwrite = blocked.invalid.length === 0 && blocked.overwritable >= blocked.missing
-    setShortage({ attempted: true, overwrite: canOverwrite ? { layer, key, behavior: next } : undefined })
+    setShortage({ attempted: true, overwrite: canOverwrite ? change : undefined })
+  }
+  // 同じ枠を指すキーがほかにあれば、連動して変えるか、このキーだけを変えるかを、先に確認する
+  const change = (key: number, next: KeyBehavior) => {
+    const place = { layer, key }
+    const decision = decideSharedEdit(state, place, answer)
+    if (decision.kind === 'ask') return setConfirm({ place, behavior: next, keys: decision.keys })
+    apply({ place, behavior: next, together: decision.kind === 'together' ? decision.keys : null })
   }
   // 空いた枠をほかのキーが使った後で、枠を空けた編集を取り消すと、枠が足りなくなる。これも止める
   const revert = (key: number) => {
     const place = { kind: 'key', layer, key } as const
     if (tryRevertEdit(state, place).blocked) return setShortage({ attempted: true })
     onAction({ type: 'revert', place })
+    setAnswer(null)
   }
 
   return (
@@ -74,7 +130,7 @@ export function KeymapView({ state, onAction }: Props) {
             key={index}
             aria-pressed={layer === index}
             className={isLayerEmpty(snapshot, index, keys, edits) ? 'empty' : ''}
-            onClick={() => setLayer(index)}
+            onClick={() => selectLayer(index)}
           >
             {index}
           </button>
@@ -112,7 +168,7 @@ export function KeymapView({ state, onAction }: Props) {
           viewOf={viewOf}
           isChanged={(target) => isChanged(edits, layer, target)}
           selected={selected}
-          onSelect={(target) => target.kind === 'key' && setSelectedKey(target.index)}
+          onSelect={(target) => target.kind === 'key' && selectKey(target.index)}
         />
       )}
       {selectedPlace?.kind === 'key' && selected && behavior ? (
@@ -124,6 +180,7 @@ export function KeymapView({ state, onAction }: Props) {
           behavior={behavior}
           view={viewOf(selected)}
           changed={isChanged(edits, layer, selected)}
+          linked={linkedKeys(edits.keys, { layer, key: selectedPlace.index }).length}
           legend={legend}
           layerCount={snapshot.keymap.length}
           layerModes={layerModesFor(snapshot.capabilities.vialProtocol).modes}
@@ -137,19 +194,34 @@ export function KeymapView({ state, onAction }: Props) {
           </section>
         )
       )}
+      {confirm && (
+        <SharedKeyDialog
+          list={sharedKeyList(state, confirm.place, confirm.keys, confirm.behavior, legend)}
+          places={keys}
+          onTogether={() => {
+            setConfirm(null)
+            apply({ place: confirm.place, behavior: confirm.behavior, together: confirm.keys })
+          }}
+          onOnly={() => {
+            setConfirm(null)
+            apply({ place: confirm.place, behavior: confirm.behavior, together: null })
+          }}
+          onClose={() => setConfirm(null)}
+        />
+      )}
       {shortage && (
         <SlotShortageDialog
           list={shortageList(state, legend)}
           attempted={shortage.attempted}
           onJump={(toLayer, key) => {
-            setLayer(toLayer)
-            setSelectedKey(key)
+            selectLayer(toLayer)
+            selectKey(key)
             setShortage(null)
           }}
           onOverwrite={
             shortage.overwrite
               ? () => {
-                  onAction({ type: 'editKey', ...shortage.overwrite!, overwriteUnused: true })
+                  send(shortage.overwrite!, true)
                   setShortage(null)
                 }
               : null

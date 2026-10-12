@@ -13,6 +13,7 @@ import {
   editCombo,
   editEncoder,
   editKey,
+  editKeysTogether,
   EMPTY_SESSION,
   hasUnwrittenChanges,
   isSourceReplaced,
@@ -25,7 +26,9 @@ import {
   sameSnapshot,
   planKeys,
   sessionReducer,
+  sharedKeys,
   tryEditKey,
+  tryEditKeysTogether,
   tryRevertEdit,
   type EditSession,
   type SessionAction,
@@ -531,4 +534,170 @@ test('読み直した内容に編集を当て直して、枠が足りなくな�
   const none = revertEdit(fewer.state, { kind: 'key', layer: 0, key: 1 })
   expect(planKeys(none).missing).toBe(0)
   expect(buildTarget(none).keymap[0][2]).toBe(0x0005)
+})
+
+// ---- 共有中のキー（同じ Tap Dance の枠を指しているキー） ----
+
+const SPACE: Action = { kind: 'key', code: 0x2c, mods: [] }
+const GUI: Action = { kind: 'key', mods: [{ kind: 'gui', side: 'left' }] }
+const SPACE_GUI_ESC: KeyBehavior = { tap: SPACE, hold: GUI, doubleTap: ESC }
+/** 実機の設定で、Tap Dance の枠 0（タップ Space ／ 長押し 左 GUI）を指している、レイヤー 0・1・2 のキー */
+const SLOT0 = [
+  { layer: 0, key: 26 },
+  { layer: 1, key: 26 },
+  { layer: 1, key: 54 },
+  { layer: 2, key: 26 },
+]
+
+test('共有: 実機の設定で、枠 0 を指す4つのキーは、どれから見ても、同じ4つを共有している', () => {
+  const loaded = loadSnapshot(cornixSnapshot())
+  for (const place of SLOT0) expect(sharedKeys(loaded, place)).toEqual(SLOT0)
+  // 枠 1 を指すキーは1つだけ。枠を使わないキーも、共有ではない
+  expect(sharedKeys(loaded, { layer: 0, key: 54 })).toEqual([])
+  expect(sharedKeys(loaded, { layer: 0, key: 1 })).toEqual([])
+  expect(sharedKeys(loaded, { layer: 0, key: 999 })).toEqual([])
+})
+
+test('共有: 枠を使わない機能（MT）で同じ内容になっているキーは、共有ではない', () => {
+  const state = editKey(editKey(loadSnapshot(cornixSnapshot()), 0, 1, TAP_A_HOLD_CTRL), 0, 2, TAP_A_HOLD_CTRL)
+  expect(sharedKeys(state, { layer: 0, key: 1 })).toEqual([])
+  expect(sharedKeys(state, { layer: 0, key: 2 })).toEqual([])
+})
+
+test('共有: この画面の編集で同じ内容になり、同じ枠を使うことになったキーも、共有している', () => {
+  const loaded = loadSnapshot(cornixSnapshot())
+  const two = editKey(editKey(loaded, 0, 1, A_ESC), 3, 2, A_ESC)
+  expect(sharedKeys(two, { layer: 0, key: 1 })).toEqual([{ layer: 0, key: 1 }, { layer: 3, key: 2 }])
+  // 出発点にある枠と同じ内容にしたキーは、その枠を指すキーに加わる
+  const withSlot = loadSnapshot(
+    altered((s) => {
+      s.tapDances[2] = { onTap: 0x04, onHold: 0, onDoubleTap: 0x29, onTapHold: 0, tappingTerm: 250 }
+      s.keymap[9][2] = 0x5702
+    }),
+  )
+  expect(sharedKeys(withSlot, { layer: 9, key: 2 })).toEqual([])
+  expect(sharedKeys(editKey(withSlot, 0, 1, A_ESC), { layer: 9, key: 2 })).toEqual([{ layer: 0, key: 1 }, { layer: 9, key: 2 }])
+  // 枠 0 と同じ内容（タップ Space ／ 長押し 左 GUI）にしたキーは、MT になり、枠を使わないので、共有に加わらない
+  const mt = editKey(loaded, 0, 1, { tap: SPACE, hold: GUI })
+  expect(sharedKeys(mt, { layer: 0, key: 1 })).toEqual([])
+  expect(sharedKeys(mt, { layer: 0, key: 26 })).toEqual(SLOT0)
+  // 1つだけを別の内容にしたキーは、共有から外れる
+  const split = editKey(loaded, 1, 54, SPACE_GUI_ESC)
+  expect(sharedKeys(split, { layer: 1, key: 54 })).toEqual([])
+  expect(sharedKeys(split, { layer: 0, key: 26 })).toEqual(SLOT0.filter((place) => place.key !== 54))
+})
+
+test('共有: 枠を割り当てられていないキー（枠が足りない時）は、共有に数えない', () => {
+  // 枠が1つもない本体に、読み直しの後で、枠が要る編集が2つ残った状態
+  const none = altered((s) => {
+    s.tapDances = []
+    s.capabilities.tapDanceCount = 0
+  })
+  const state = { ...editKey(editKey(loadSnapshot(cornixSnapshot()), 0, 1, A_ESC), 0, 2, A_ESC), source: none }
+  expect(planKeys(state).missing).toBe(1)
+  expect(sharedKeys(state, { layer: 0, key: 1 })).toEqual([])
+})
+
+test('連動して変更: 同じ枠を指すキーすべてが同じ内容になり、枠は増えない。まとめて1件として数える', () => {
+  const loaded = loadSnapshot(cornixSnapshot())
+  expect(planKeys(loaded).free).toBe(30)
+  const { state, blocked } = tryEditKeysTogether(loaded, SLOT0, SPACE_GUI_ESC)
+  expect(blocked).toBeNull()
+  expect(state.edits.keys).toEqual(SLOT0.map((place) => ({ ...place, behavior: SPACE_GUI_ESC, link: 0 })))
+  expect(countEdits(state)).toBe(1)
+  // 4つとも同じ枠（空いていた枠 2）を指す。元の枠 0 は空になり、使っている枠の数は変わらない。ほかのキーと枠は変わらない
+  expect(buildTarget(state)).toEqual(
+    altered((s) => {
+      for (const { layer, key } of SLOT0) s.keymap[layer][key] = 0x5702
+      s.tapDances[2] = { onTap: 0x2c, onHold: 0xe3, onDoubleTap: 0x29, onTapHold: 0, tappingTerm: 250 }
+      s.tapDances[0] = { onTap: 0, onHold: 0, onDoubleTap: 0, onTapHold: 0, tappingTerm: 250 }
+    }),
+  )
+  expect(planKeys(state).free).toBe(30)
+  expect(sharedKeys(state, SLOT0[0])).toEqual(SLOT0)
+})
+
+test('連動して変更: 枠を使わない内容にすれば、4つとも通常のキーになり、枠が1つ空く', () => {
+  const state = editKeysTogether(loadSnapshot(cornixSnapshot()), SLOT0, { tap: SPACE })
+  const target = buildTarget(state)
+  for (const { layer, key } of SLOT0) expect(target.keymap[layer][key]).toBe(0x2c)
+  expect(planKeys(state).free).toBe(31)
+  expect(countEdits(state)).toBe(1)
+})
+
+test('連動して変更: どのキーから取り消しても、まとめて元に戻る', () => {
+  const loaded = loadSnapshot(cornixSnapshot())
+  const state = editKey(editKeysTogether(loaded, SLOT0, SPACE_GUI_ESC), 0, 1, { tap: B })
+  expect(countEdits(state)).toBe(2)
+  const reverted = tryRevertEdit(state, { kind: 'key', layer: 1, key: 54 }).state
+  expect(reverted.edits.keys).toEqual([{ layer: 0, key: 1, behavior: { tap: B } }])
+  expect(countEdits(reverted)).toBe(1)
+  // 連動していないキーの取り消しは、そのキーだけ
+  expect(revertEdit(state, { kind: 'key', layer: 0, key: 1 }).edits.keys).toHaveLength(4)
+  // 連動して元の内容に戻したら、編集は残らない
+  expect(editKeysTogether(state, SLOT0, { tap: SPACE, hold: GUI }).edits.keys).toEqual([{ layer: 0, key: 1, behavior: { tap: B } }])
+})
+
+test('連動して変更: 同じ組をもう一度変えても、1件のまま。組の1つだけを変えると、そのキーは組から外れて、別の1件になる', () => {
+  const loaded = loadSnapshot(cornixSnapshot())
+  const once = editKeysTogether(loaded, SLOT0, SPACE_GUI_ESC)
+  const twice = editKeysTogether(once, SLOT0, { tap: SPACE, hold: CTRL })
+  expect(twice.edits.keys).toEqual(SLOT0.map((place) => ({ ...place, behavior: { tap: SPACE, hold: CTRL }, link: 0 })))
+  expect(countEdits(twice)).toBe(1)
+  // 同じ内容でもう一度変えても、状態は変わらない（画面を描き直さない）
+  expect(editKeysTogether(twice, SLOT0, { tap: SPACE, hold: CTRL })).toBe(twice)
+
+  const split = editKey(twice, 1, 26, { tap: A })
+  expect(countEdits(split)).toBe(2)
+  expect(split.edits.keys.find((edit) => edit.layer === 1 && edit.key === 26)).toEqual({ layer: 1, key: 26, behavior: { tap: A } })
+  // 外れたキーの取り消しは、そのキーだけ。残りの3つは、まとめて取り消す
+  expect(revertEdit(split, { kind: 'key', layer: 1, key: 26 }).edits.keys).toHaveLength(3)
+  expect(revertEdit(split, { kind: 'key', layer: 0, key: 26 }).edits.keys).toEqual([{ layer: 1, key: 26, behavior: { tap: A } }])
+  // 別の組には、別の番号が付く
+  const other = editKeysTogether(twice, [{ layer: 0, key: 1 }, { layer: 0, key: 2 }], A_ESC)
+  expect(other.edits.keys.slice(4).map((edit) => edit.link)).toEqual([1, 1])
+  expect(countEdits(other)).toBe(2)
+})
+
+test('このキーだけ変更: 選んだキーだけが変わり、内容が分かれるので、枠が1つ増える', () => {
+  const loaded = loadSnapshot(cornixSnapshot())
+  const { state, blocked } = tryEditKey(loaded, 1, 54, SPACE_GUI_ESC)
+  expect(blocked).toBeNull()
+  const target = buildTarget(state)
+  expect(target.keymap[1][54]).toBe(0x5702)
+  for (const { layer, key } of SLOT0.filter((place) => place.key !== 54)) expect(target.keymap[layer][key]).toBe(0x5700)
+  expect(target.tapDances[0]).toEqual(loaded.source.tapDances[0])
+  expect(planKeys(state).free).toBe(29)
+  expect(countEdits(state)).toBe(1)
+})
+
+test('空いている枠がない時: 「このキーだけ変更」は止まり、「連動して変更」は、空く枠を使うので通る', () => {
+  // 枠 2〜31 を、レイヤー 9 のキーから1つずつ使う
+  const loaded = loadSnapshot(
+    altered((s) => {
+      for (let slot = 2; slot < 32; slot++) {
+        s.tapDances[slot] = { onTap: 0x04 + slot, onHold: 0, onDoubleTap: 0x2c, onTapHold: 0, tappingTerm: 250 }
+        s.keymap[9][slot] = 0x5700 + slot
+      }
+    }),
+  )
+  expect(planKeys(loaded).free).toBe(0)
+  const alone = tryEditKey(loaded, 1, 54, SPACE_GUI_ESC)
+  expect(alone.blocked).toMatchObject({ missing: 1 })
+  expect(alone.state).toBe(loaded)
+
+  const together = tryEditKeysTogether(loaded, SLOT0, SPACE_GUI_ESC)
+  expect(together.blocked).toBeNull()
+  const target = buildTarget(together.state)
+  for (const { layer, key } of SLOT0) expect(target.keymap[layer][key]).toBe(0x5700)
+  expect(target.tapDances[0]).toMatchObject({ onTap: 0x2c, onHold: 0xe3, onDoubleTap: 0x29 })
+})
+
+test('連動して変更は、reducer からも同じ結果になる。1つだけ渡した時は、そのキーだけの編集になる', () => {
+  const loaded = run([{ type: 'read', snapshot: cornixSnapshot() }])
+  const session = run([{ type: 'editKeysTogether', keys: SLOT0, behavior: SPACE_GUI_ESC }], loaded)
+  expect(session.edit).toEqual(editKeysTogether(loaded.edit!, SLOT0, SPACE_GUI_ESC))
+  expect(run([{ type: 'revert', place: { kind: 'key', layer: 2, key: 26 } }], session).edit!.edits).toEqual(EMPTY_EDITS)
+  expect(editKeysTogether(loaded.edit!, [SLOT0[0]], SPACE_GUI_ESC)).toEqual(editKey(loaded.edit!, 0, 26, SPACE_GUI_ESC))
+  expect(editKeysTogether(loaded.edit!, [], SPACE_GUI_ESC)).toBe(loaded.edit)
 })

@@ -1,22 +1,9 @@
-import type { CSSProperties } from 'react'
-import { boundsOf, type Bounds, type PlacedKey } from '../model/layout.ts'
+import { boundsOf, type PlacedKey } from '../model/layout.ts'
 import { filledSlots, type BehaviorSlot } from '../model/behavior.ts'
-import { isLong, slotsName, targetId, targetName, targetOf, type KeyTarget, type KeyView } from './keyView.ts'
+import { isLong, placeOf, slotsName, targetId, targetName, targetOf, type KeyTarget, type KeyView } from './keyView.ts'
 
-/** キー1つぶんの大きさと、キーどうしのすき間（px） */
+/** キー1つぶんの大きさ（px） */
 const UNIT = 64
-const GAP = 4
-
-function placeOf(key: PlacedKey, box: Bounds): CSSProperties {
-  return {
-    left: (key.x - box.minX) * UNIT,
-    top: (key.y - box.minY) * UNIT,
-    width: key.w * UNIT - GAP,
-    height: key.h * UNIT - GAP,
-    transform: key.r ? `rotate(${key.r}deg)` : undefined,
-    transformOrigin: `${(key.rx - key.x) * UNIT}px ${(key.ry - key.y) * UNIT}px`,
-  }
-}
 
 interface FigureProps {
   keys: readonly PlacedKey[]
