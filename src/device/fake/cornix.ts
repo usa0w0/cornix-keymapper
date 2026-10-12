@@ -10,5 +10,5 @@ export function cornixSnapshot(): KeyboardSnapshot {
 }
 
 export function createFakeCornix(options: FakeOptions = {}): FakeKeyboard {
-  return new FakeKeyboard(cornixSnapshot(), { name: 'Cornix（偽の機器）', ...options })
+  return new FakeKeyboard(cornixSnapshot(), { name: 'Cornix', ...options })
 }
