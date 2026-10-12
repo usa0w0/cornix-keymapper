@@ -14,6 +14,18 @@ export function sameValue(a: unknown, b: unknown): boolean {
 /** 2つのスナップショットが、機器の識別・レイアウト定義・枠数も含めて、すべて同じか */
 export const sameSnapshot = (a: KeyboardSnapshot, b: KeyboardSnapshot) => sameValue(a, b)
 
+/**
+ * 2つのスナップショットの、本体の構成（レイヤー、キー、エンコーダー、Tap Dance の枠、コンボの枠の数）が同じか。
+ * 違うものどうしでは、片方の内容をもう片方に書けない
+ */
+export const sameShape = (a: KeyboardSnapshot, b: KeyboardSnapshot) =>
+  a.layout.rows === b.layout.rows &&
+  a.layout.cols === b.layout.cols &&
+  a.layout.encoderCount === b.layout.encoderCount &&
+  a.capabilities.layerCount === b.capabilities.layerCount &&
+  a.capabilities.tapDanceCount === b.capabilities.tapDanceCount &&
+  a.capabilities.comboCount === b.capabilities.comboCount
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
