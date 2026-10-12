@@ -7,9 +7,9 @@ import { definitionJson } from './testing/definitionFixture.ts'
 import { respond } from './testing/simulatedKeyboard.ts'
 import { ExchangeLog, type HidEvents, type RawHidDevice } from './vialDevice.ts'
 // 実機（Cornix LP、ファームウェア V1.12）から 2026-10-12 に取った記録。UID だけ、にせの値に置き換えてある
-import cornixBluetooth from './testing/cornix/bluetooth.json'
-import cornixUsb from './testing/cornix/usb.json'
-import cornixVil from './testing/cornix/cornix.vil?raw'
+import cornixBluetooth from '../fixtures/cornix/bluetooth.json'
+import cornixUsb from '../fixtures/cornix/usb.json'
+import cornixVil from '../fixtures/cornix/cornix.vil?raw'
 
 const collection = (usagePage: number, usage: number, reportId?: number): HIDCollectionInfo => ({
   usagePage,

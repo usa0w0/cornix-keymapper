@@ -9,11 +9,15 @@ export class DeviceError extends Error {
   /** どの処理の途中で失敗したか（例: キーマップの読み出し）。画面に出す */
   readonly step?: string
 
-  constructor(kind: DeviceErrorKind, options?: ErrorOptions & { step?: string }) {
+  /** 書き込みで、何番目の操作で失敗したか（0 から数える）。それより前の操作は書き終えている */
+  readonly operation?: number
+
+  constructor(kind: DeviceErrorKind, options?: ErrorOptions & { step?: string; operation?: number }) {
     super(`device: ${kind}`, options)
     this.name = 'DeviceError'
     this.kind = kind
     this.step = options?.step
+    this.operation = options?.operation
   }
 }
 
@@ -61,6 +65,19 @@ export interface KeyboardSnapshot {
   encoders: [number, number][][]
   tapDances: TapDanceEntry[]
   combos: ComboEntry[]
+}
+
+/** 本体に書く操作1つ。1キー、エンコーダーの1方向、Tap Dance の1枠、コンボの1枠 */
+export type WriteOperation =
+  | { type: 'setKey'; layer: number; key: number; keycode: number }
+  | { type: 'setEncoder'; layer: number; encoder: number; direction: 'left' | 'right'; keycode: number }
+  | { type: 'setTapDance'; index: number; entry: TapDanceEntry }
+  | { type: 'setCombo'; index: number; entry: ComboEntry }
+
+export interface WriteProgress {
+  /** 書き終えた操作の数 */
+  done: number
+  total: number
 }
 
 export interface ReadProgress {
