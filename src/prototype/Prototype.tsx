@@ -299,15 +299,6 @@ function EditPanel(props: {
             ? `エンコーダー ${selection.encoder + 1} の${selection.direction === 0 ? '左回し' : '右回し'}`
             : `行 ${Math.floor(selection.index / cols)} 列 ${selection.index % cols} のキー`}
         </h2>
-        {behavior.state !== 'transparent' && (
-          <button
-            type="button"
-            title="このキーを空にして、下のレイヤーの動作がそのまま効くようにする"
-            onClick={() => onChange({ state: 'transparent', slots: {} })}
-          >
-            透過にする
-          </button>
-        )}
         {changed && (
           <button type="button" onClick={() => onChange(null)}>
             変更を取り消す
@@ -322,11 +313,23 @@ function EditPanel(props: {
       {view.state === 'transparent' && (
         <p className="edit-note">
           透過のキーです。下のレイヤーの動作（{view.inherited?.slots.tap?.full ?? '何もしない'}
-          ）がそのまま効きます。欄に動作を入れると、透過ではなくなります。
+          ）がそのまま効きます。
+          <button type="button" onClick={() => onChange({ state: 'none', slots: {} })}>
+            透過をやめる
+          </button>
         </p>
       )}
       {view.state === 'none' && (
-        <p className="edit-note">欄がすべて空なので、このキーは押しても何も起きません。</p>
+        <p className="edit-note">
+          欄がすべて空なので、このキーは押しても何も起きません。
+          <button
+            type="button"
+            title="下のレイヤーの動作が、そのまま効くようにする"
+            onClick={() => onChange({ state: 'transparent', slots: {} })}
+          >
+            透過にする
+          </button>
+        </p>
       )}
       <div className={`fields ${isEncoder ? 'fields-one' : ''}`}>
         {(isEncoder ? (['tap'] as Slot[]) : SLOTS).map((slot) => {

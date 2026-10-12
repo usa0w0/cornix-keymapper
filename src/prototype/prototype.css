@@ -360,6 +360,11 @@
   color: var(--muted);
 }
 
+.proto .edit-note button {
+  margin-left: 0.6rem;
+  color: var(--text);
+}
+
 .proto .fields {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
