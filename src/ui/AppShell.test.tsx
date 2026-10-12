@@ -42,6 +42,7 @@ const header = (connection: ConnectionState, options: { supported?: boolean; rea
       slots={options.read ? slotCounts(report.snapshot) : null}
       changes={options.changes ?? 0}
       onWrite={options.changes ? () => {} : null}
+      onBackups={() => {}}
       onConnect={() => {}}
       onDisconnect={() => {}}
       onDeviceInfo={options.read && connection.status === 'connected' ? () => {} : null}
@@ -104,12 +105,13 @@ test('読み出す前のヘッダー: 機器名と「切断」だけを出し、
   expect(html).not.toContain('書き込み')
 })
 
-test('読み出した後のヘッダー: 本体の情報を開くボタン、残り枠数、押せない保存と書き込みのボタンを出す', () => {
+test('読み出した後のヘッダー: 本体の情報を開くボタン、残り枠数、バックアップ、押せない保存と書き込みのボタンを出す', () => {
   const html = header({ status: 'connected', device }, { read: true })
   expect(html).toContain('title="接続中のキーボードの情報を見る">接続済み: Cornix ▾</button>')
   expect(html).toContain('Tap Dance 残り <b>30</b> / 32')
   expect(html).toContain('コンボ 残り <b>32</b> / 32')
-  for (const name of ['バックアップ', '.vil に保存', '.vil を読み込む', '書き込み（変更 0 件）']) {
+  expect(html).toContain('<button type="button" title="自動バックアップの一覧を見る">バックアップ</button>')
+  for (const name of ['.vil に保存', '.vil を読み込む', '書き込み（変更 0 件）']) {
     expect(html).toMatch(new RegExp(`<button type="button"[^>]*disabled=""[^>]*>${name.replace(/[.()（）]/g, '\\$&')}</button>`))
   }
 })
@@ -315,6 +317,7 @@ test('つなぎ直して読み直している間のヘッダー: 読み終える
       slots={slotCounts(report.snapshot)}
       changes={1}
       onWrite={() => {}}
+      onBackups={() => {}}
       onConnect={() => {}}
       onDisconnect={() => {}}
       onDeviceInfo={null}

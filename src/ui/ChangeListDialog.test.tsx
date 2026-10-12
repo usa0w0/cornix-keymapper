@@ -18,13 +18,15 @@ import { ChangeListDialog } from './ChangeListDialog.tsx'
 const A: Action = { kind: 'key', code: 0x04, mods: [] }
 const B: Action = { kind: 'key', code: 0x05, mods: [] }
 
-const render = (state: EditState, options: { confirmAll?: boolean; refused?: string } = {}) =>
+const render = (state: EditState, options: { confirmAll?: boolean; refused?: string; blocked?: string; rewritesUsed?: boolean } = {}) =>
   renderToStaticMarkup(
     <ChangeListDialog
       state={state}
       changes={listChanges(state)}
       onAction={() => {}}
       onClose={() => {}}
+      write={options.blocked === undefined ? { onWrite: () => {} } : { blocked: options.blocked }}
+      rewritesUsed={options.rewritesUsed}
       initialConfirmAll={options.confirmAll}
       initialRefused={options.refused}
     />,
@@ -72,14 +74,33 @@ test('連動して変えたキーの組は、見出しの下にキーを並べ�
   expect(html).not.toMatch(/Tap Dance \d|TD\(/)
 })
 
-test('「本体に書き込む」は置き場所だけで、押せない。「すべて取り消す」は、確かめてから行う', () => {
+test('「本体に書き込む」を押せる。書き込む前に自動でバックアップする旨を出す。「すべて取り消す」は、確かめてから行う', () => {
   const html = render(edited())
-  expect(html).toContain('<button type="button" class="primary" disabled="" title="準備中">本体に書き込む</button>')
+  expect(html).toContain('<button type="button" class="primary">本体に書き込む</button>')
+  expect(html).toContain('<p class="write-note">書き込む前に、いまの本体の設定を自動でバックアップします。</p>')
+  expect(html).not.toContain('write-caution')
+  expect(html).not.toContain('write-blocked')
   expect(html).toContain('<span class="changes-all"><button type="button">すべて取り消す…</button></span>')
   expect(html).toContain('<button type="button" class="changes-close">閉じる</button>')
   const confirming = render(edited(), { confirmAll: true })
   expect(confirming).toContain('4 件の変更をすべて取り消して、本体から読み込んだ内容に戻します。元には戻せません。')
   expect(confirming).toContain('<button type="button">すべて取り消す</button><button type="button">やめる</button>')
+})
+
+test('書き込めない間は、「本体に書き込む」を押せなくして、理由を出す（接続が切れている、目標を作れない、など）', () => {
+  const blocked = '書き込めない変更があります（一覧に理由が出ています）。その変更を取り消すと、書き込めます。'
+  const html = render(edited(), { blocked })
+  expect(html).toContain(`<p class="write-blocked" role="status">${blocked}</p>`)
+  expect(html).toContain(`<button type="button" class="primary" disabled="" title="${blocked}">本体に書き込む</button>`)
+  // 変更点を見て、取り消すことはできる
+  expect(count(html, '>取り消す</button>')).toBe(4)
+})
+
+test('使用中の枠の中身を書き換えるしかない書き込みでは、途中で失敗した時のことを、書き込む前に伝える', () => {
+  const html = render(edited(), { rewritesUsed: true })
+  expect(html).toContain('<p class="write-caution">この書き込みでは、いま使っている Tap Dance')
+  expect(html).toContain('変える前とも後とも違う動作になることがあります')
+  expect(html).toContain('「再試行」か「書き込み前の状態に戻す」で直せます。')
 })
 
 test('変更がない時は、その旨を出し、「すべて取り消す」は押せない', () => {
@@ -88,6 +109,7 @@ test('変更がない時は、その旨を出し、「すべて取り消す」�
   expect(html).toContain('<p class="changes-empty">変更はありません。</p>')
   expect(html).not.toContain('<table')
   expect(html).toContain('<button type="button" disabled="">すべて取り消す…</button>')
+  expect(html).not.toContain('write-note')
 })
 
 test('取り消すと枠が足りなくなる変更は、取り消さずに、その行に理由を出す', () => {

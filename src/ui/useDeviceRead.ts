@@ -89,5 +89,11 @@ export function useDeviceRead(device: KeyboardDevice | null) {
     [],
   )
 
-  return { state: readStateFor(held, device), read, replace }
+  /** 書き込みの流れの中で読み終えた内容を、その機器の読み出しの結果として置く（つなぎ直した後の機器でも置ける） */
+  const put = useCallback((target: KeyboardDevice, report: ReadReport) => {
+    const run = ++runs.current
+    setHeld({ device: target, run, state: { status: 'done', report } })
+  }, [])
+
+  return { state: readStateFor(held, device), read, replace, put }
 }

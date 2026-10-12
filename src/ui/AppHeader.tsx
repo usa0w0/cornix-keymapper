@@ -1,8 +1,6 @@
 import type { ConnectionState } from './useConnection.ts'
 import type { SlotCount } from './deviceInfo.ts'
-
-// develop のビルドは /cornix-keymapper/dev/ で配信される（.github/workflows/deploy.yml）
-const isDevSite = import.meta.env.BASE_URL.endsWith('/dev/')
+import { isDevSite } from './site.ts'
 
 interface Props {
   connection: ConnectionState
@@ -14,6 +12,8 @@ interface Props {
   changes: number
   /** 変更点の確認のダイアログを開く。変更がない間は null */
   onWrite: (() => void) | null
+  /** 自動バックアップの一覧を開く */
+  onBackups: () => void
   onConnect: () => void
   onDisconnect: () => void
   /** 本体の情報のダイアログを開く。接続中の機器を読み終えるまでは null */
@@ -21,7 +21,7 @@ interface Props {
 }
 
 /** ヘッダー。タイトル、接続の状態、残り枠数と、保存・書き込みのボタン */
-export function AppHeader({ connection, supported, slots, changes, onWrite, onConnect, onDisconnect, onDeviceInfo }: Props) {
+export function AppHeader({ connection, supported, slots, changes, onWrite, onBackups, onConnect, onDisconnect, onDeviceInfo }: Props) {
   return (
     <header className="app-header">
       <h1>
@@ -59,10 +59,10 @@ export function AppHeader({ connection, supported, slots, changes, onWrite, onCo
           <span className="slots">
             コンボ 残り <b>{slots.combo.free}</b> / {slots.combo.total}
           </span>
-          {/* 次の3つは置き場所だけ。中身は、バックアップが #15、.vil が #16 */}
-          <button type="button" disabled title="準備中">
+          <button type="button" title="自動バックアップの一覧を見る" onClick={onBackups}>
             バックアップ
           </button>
+          {/* 次の2つは置き場所だけ。中身は #16 */}
           <button type="button" disabled title="準備中">
             .vil に保存
           </button>

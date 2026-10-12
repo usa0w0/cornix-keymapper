@@ -50,6 +50,13 @@ export function countDifferences(a: KeyboardSnapshot, b: KeyboardSnapshot): numb
 
 const trimZeros = (hex: string) => hex.replace(/(00)+$/, '')
 
+export const EXCHANGE_FORMAT =
+  '要求>応答@ミリ秒。16 進で、末尾の 00 は省く。応答なし（タイムアウト）は -。要求が空のものは、どの要求への応答でもないとして捨てた応答'
+
+/** 通信の記録を、1往復を1行の文字列にする */
+export const formatExchanges = (exchanges: readonly ExchangeRecord[]): string[] =>
+  exchanges.map((e) => `${trimZeros(e.request)}>${e.response === null ? '-' : trimZeros(e.response)}@${e.ms}`)
+
 export interface ReadReport {
   note: string
   readAt: string
@@ -71,20 +78,19 @@ export function buildReadReport(input: {
   snapshot: KeyboardSnapshot
   differencesFromPrevious: number | null
   exchanges: ExchangeRecord[]
+  /** 何の記録か。省くと、読み出しの記録 */
+  note?: string
 }): ReadReport {
   return {
-    note: 'Cornix キーマッパーの読み出しの記録。設計の確定とテストデータに使う',
+    note: input.note ?? 'Cornix キーマッパーの読み出しの記録。設計の確定とテストデータに使う',
     readAt: input.readAt.toISOString(),
     userAgent: input.userAgent,
     device: input.device,
     differencesFromPrevious: input.differencesFromPrevious,
     stats: summarizeExchanges(input.exchanges),
     snapshot: input.snapshot,
-    exchangeFormat:
-      '要求>応答@ミリ秒。16 進で、末尾の 00 は省く。応答なし（タイムアウト）は -。要求が空のものは、どの要求への応答でもないとして捨てた応答',
-    exchanges: input.exchanges.map(
-      (e) => `${trimZeros(e.request)}>${e.response === null ? '-' : trimZeros(e.response)}@${e.ms}`,
-    ),
+    exchangeFormat: EXCHANGE_FORMAT,
+    exchanges: formatExchanges(input.exchanges),
   }
 }
 

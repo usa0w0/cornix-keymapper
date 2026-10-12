@@ -163,13 +163,28 @@ const ERROR_KINDS: readonly DeviceErrorKind[] = ['timeout', 'send-failed', 'disc
 
 /**
  * URL の指定から、わざと起こす失敗を作る。画面で失敗の場面を確かめるための入口で、ふだんの画面には出さない。
- * failRead=N で N 回目の読み出しが失敗する。failKind で失敗の種類（省くと timeout）を選ぶ
+ * 番号は、どれも、ページを開いてから 1 から数える（読み出しは、接続した時の読み出しが 1 回目）。
+ * - failRead=N: N 回目の読み出しが失敗する
+ * - failWrite=N: N 番目の書き込みの操作で失敗する
+ * - disconnectWrite=N: N 番目の書き込みの操作の直前に、機器がなくなる
+ * - alterRead=N: N 回目の読み出しだけ、レイヤー 0 の最初のキーが違う値で読める（照合の不一致）
+ * failKind で、failRead と failWrite の失敗の種類（省くと timeout）を選ぶ
  */
 export function failuresFromQuery(query: URLSearchParams): FakeFailures {
-  const read = Number(query.get('failRead'))
-  if (!Number.isInteger(read) || read < 1) return {}
+  const count = (name: string) => {
+    const value = Number(query.get(name))
+    return Number.isInteger(value) && value >= 1 ? value : undefined
+  }
   const kind = ERROR_KINDS.find((known) => known === query.get('failKind'))
-  return { failReadAt: { read, kind } }
+  const [read, write, disconnectAtWrite, alterRead] = [count('failRead'), count('failWrite'), count('disconnectWrite'), count('alterRead')]
+  const failures: FakeFailures = {}
+  if (read !== undefined) failures.failReadAt = { read, kind }
+  if (write !== undefined) failures.failWriteAt = { operation: write, kind }
+  if (disconnectAtWrite !== undefined) failures.disconnectAtWrite = disconnectAtWrite
+  if (alterRead !== undefined) {
+    failures.alterReadAt = { read: alterRead, alter: (snapshot) => (snapshot.keymap[0][0] = snapshot.keymap[0][0] === 4 ? 5 : 4) }
+  }
+  return failures
 }
 
 /** 操作を1つ、本体の中身に反映する。本体にない場所を指す操作は、呼び出し側の誤りとして RangeError にする */

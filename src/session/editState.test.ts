@@ -10,6 +10,7 @@ import { customKeycodesOf, keycodeToAction } from '../model/keycodes.ts'
 import {
   addCombo,
   buildTarget,
+  tryBuildTarget,
   comboKeyAt,
   comboList,
   combosOfKey,
@@ -688,6 +689,9 @@ test('読み直した内容に編集を当て直して、枠が足りなくな�
   const state = reapplyEdits(edited, full())
   expect(planKeys(state)).toMatchObject({ missing: 2, free: 0 })
   expect(() => buildTarget(state)).toThrow('足りない')
+  // 目標を作れない間は、書き込みを始めない（画面は「本体に書き込む」を押せなくする）
+  expect(tryBuildTarget(state)).toBeNull()
+  expect(tryBuildTarget(edited)).toEqual(buildTarget(edited))
   // 枠が要るキーを、さらに足すことはできない
   expect(tryEditKey(state, 0, 3, { tap: B, tapHold: ESC }).blocked).toMatchObject({ missing: 3 })
   // 足りない数が増えない編集は通る
@@ -1043,4 +1047,20 @@ test('目標と、本体の現在値から作った操作を、偽の機器に�
   expect(sameSnapshot(await device!.read(), target)).toBe(true)
   // 書いた後は、送るものがない
   expect(writeOperations(await device!.read(), target)).toEqual([])
+})
+
+test('書き込み前に本体の設定が変わっていた時の「本体から読み込み直す」: 編集と選択待ちを捨てて、読み直した内容から始め直す', () => {
+  const snapshot = cornixSnapshot()
+  const fresh = altered((s) => (s.keymap[1][0] = 0x0007))
+  const edited = run([
+    { type: 'read', snapshot },
+    { type: 'editKey', layer: 0, key: 1, behavior: TAP_A_HOLD_CTRL },
+  ])
+  expect(hasUnwrittenChanges(edited.edit!)).toBe(true)
+
+  expect(run([{ type: 'reload', snapshot: fresh }], edited)).toEqual({ edit: loadSnapshot(fresh), pending: null })
+  // 選択待ちの間でも、読み込み直せる
+  const waiting = run([{ type: 'read', snapshot: fresh }], edited)
+  expect(waiting.pending).not.toBeNull()
+  expect(run([{ type: 'reload', snapshot: fresh }], waiting)).toEqual({ edit: loadSnapshot(fresh), pending: null })
 })

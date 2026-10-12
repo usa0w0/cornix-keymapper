@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { KeyboardDevice } from '../device/types.ts'
+import { downloadJson } from './download.ts'
 import { describeReadError, hex16, type ReadFailure, type ReadReport } from './readReport.ts'
 import { readReportFrom } from './useDeviceRead.ts'
 
@@ -44,14 +45,7 @@ export function Diagnostics({ device, report, onReport }: Props) {
     }
   }
 
-  const save = () => {
-    const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 1)], { type: 'application/json' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `cornix-read-${report.readAt.replace(/[:.]/g, '-')}.json`
-    link.click()
-    URL.revokeObjectURL(url)
-  }
+  const save = () => downloadJson(`cornix-read-${report.readAt.replace(/[:.]/g, '-')}.json`, report)
 
   return (
     <details className="diagnostics">
