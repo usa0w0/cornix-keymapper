@@ -588,7 +588,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
-  margin-bottom: 0.7rem;
+  margin-bottom: 1.4rem;
 }
 
 .proto .picker-tabs button,
