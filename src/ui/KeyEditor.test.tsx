@@ -137,12 +137,21 @@ test('編集欄: エンコーダーは、欄が1つ（回した時）。動作�
   expect(html).not.toContain('押している間だけ')
 })
 
-test('編集欄: 欄が空のエンコーダーは、回しても何も起きない旨と、「透過」のスイッチを出す', () => {
+test('編集欄: 欄が空のエンコーダーは、回しても何も起きない旨を出す。「透過」のスイッチは出さない', () => {
   const html = turnEditor({ kind: 'none' })
   expect(count(html, '（なし）</button>')).toBe(1)
   expect(html).not.toContain('field-clear')
-  expect(html).toContain('role="switch" class="switch" aria-checked="false"')
+  expect(html).not.toContain('role="switch"')
   expect(html).toContain('欄が空なので、この向きに回しても何も起きません。')
+})
+
+test('編集欄: 本体から読んだ値が透過のエンコーダーは、透過である旨を出す。スイッチは出さず、動作を選んで上書きはできる', () => {
+  const html = turnEditor({ kind: 'transparent' })
+  expect(html).toContain('<span class="key state-transparent">')
+  expect(html).toContain('透過です。下のレイヤーに、効く動作がありません。')
+  expect(html).not.toContain('role="switch"')
+  expect(count(html, '（なし）</button>')).toBe(1)
+  expect(html).toContain('「回した時」に入れる動作')
 })
 
 test('編集欄: 本体から読んだエンコーダーが Tap Dance などを指している時は、編集不可として出す。動作を選んで上書きはできる', () => {

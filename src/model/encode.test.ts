@@ -444,14 +444,15 @@ const turn = (layer: number, encoder: number, direction: 'left' | 'right', actio
 })
 const turns = (...encoders: EncoderEdit[]): Edits => ({ keys: [], encoders, combos: [] })
 
-test('エンコーダーの動作は、キーコード1つになる。「押している間だけレイヤー N」と、キーコード1つで表せない動作は入れられない', () => {
+test('エンコーダーの動作は、キーコード1つになる。透過、「押している間だけレイヤー N」、キーコード1つで表せない動作は入れられない', () => {
   expect(encodeEncoderAction(key(VOLUME_UP))).toBe(VOLUME_UP)
   expect(encodeEncoderAction(CTRL_C)).toBe(0x0106)
   expect(encodeEncoderAction(L_CTRL)).toBe(0x00e0)
   expect(encodeEncoderAction({ kind: 'layer', mode: 'toggle', layer: 3 })).toBe(0x5263)
-  // 欄を消した時の「何もしない」と、透過
+  // 欄を消した時の「何もしない」
   expect(encodeEncoderAction({ kind: 'none' })).toBe(0x0000)
-  expect(encodeEncoderAction({ kind: 'transparent' })).toBe(0x0001)
+  // 透過は、実機で効くか確かめていないので、入れられない
+  expect(encodeEncoderAction({ kind: 'transparent' })).toBeUndefined()
   // 本体から読んだ、このサイトで扱わない動作は、元の値に戻る
   expect(encodeEncoderAction({ kind: 'unsupported', raw: TD + 3, label: 'Tap Dance 3' })).toBe(TD + 3)
   expect(encodeEncoderAction(mo(1))).toBeUndefined()

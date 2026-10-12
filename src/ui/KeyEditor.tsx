@@ -39,7 +39,8 @@ const TURN_SLOTS: readonly BehaviorSlot[] = ['tap']
  * 編集欄。図の下に、選んだキーの見た目・場所・4つの欄と、動作を選ぶ部品を出す。
  * 欄を押すと選ばれ、動作を選ぶ部品で選んだ動作が、その欄に入る。
  * 4つとも空のキーは何もしないキーで、その時だけ「透過」のスイッチを出す。
- * エンコーダーは、欄が1つ（回した時）。ほかはキーと同じ
+ * エンコーダーは、欄が1つ（回した時）。「透過」のスイッチは出さない（実機で効くか確かめていないため。
+ * 本体から読んだ値が透過の時は、その旨だけを出す）
  */
 export function KeyEditor(props: Props) {
   const { layer, place, behavior, view, changed, linked = 1, legend, layerCount, layerModes, onChange, onRevert } = props
@@ -75,24 +76,28 @@ export function KeyEditor(props: Props) {
       )}
       {empty && (
         <p className="edit-note">
-          <button
-            type="button"
-            role="switch"
-            className="switch"
-            aria-checked={view.state === 'transparent'}
-            title="オンにすると、下のレイヤーの動作がそのまま効く"
-            onClick={() => onChange({ tap: { kind: view.state === 'transparent' ? 'none' : 'transparent' } })}
-          >
-            <span className="switch-track" />
-            透過
-          </button>
+          {!turn && (
+            <button
+              type="button"
+              role="switch"
+              className="switch"
+              aria-checked={view.state === 'transparent'}
+              title="オンにすると、下のレイヤーの動作がそのまま効く"
+              onClick={() => onChange({ tap: { kind: view.state === 'transparent' ? 'none' : 'transparent' } })}
+            >
+              <span className="switch-track" />
+              透過
+            </button>
+          )}
           {view.state === 'none'
             ? turn
               ? '欄が空なので、この向きに回しても何も起きません。'
               : '欄がすべて空なので、このキーは押しても何も起きません。'
-            : view.inherited
-              ? `下のレイヤーの動作（レイヤー ${view.inherited.layer} の「${slotsName(view.inherited.slots)}」）がそのまま効きます。`
-              : '下のレイヤーに、効く動作がありません。'}
+            : `${turn ? '透過です。' : ''}${
+                view.inherited
+                  ? `下のレイヤーの動作（レイヤー ${view.inherited.layer} の「${slotsName(view.inherited.slots)}」）がそのまま効きます。`
+                  : '下のレイヤーに、効く動作がありません。'
+              }`}
         </p>
       )}
       <div className={`fields${turn ? ' fields-one' : ''}`}>

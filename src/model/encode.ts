@@ -92,11 +92,12 @@ export function encodeBehavior(behavior: KeyBehavior): EncodedKey | undefined {
 
 /**
  * エンコーダーの1方向の動作を、キーコードに直す。動作1つが、キーコード1つになる。
- * 「何もしない」と「透過」は入れられる（欄を消した時と、透過のスイッチ）。本体から読んだ、このサイトで扱わない動作は、元の値に戻る。
- * 「押している間だけレイヤー N」（回す操作には「押している間」がない）と、キーコード1つで表せない動作は undefined
+ * 「何もしない」は入れられる（欄を消した時）。本体から読んだ、このサイトで扱わない動作は、元の値に戻る。
+ * 「透過」（実機で効くか確かめていない。docs/design.md「実機で確かめること」の 18）、
+ * 「押している間だけレイヤー N」（回す操作には「押している間」がない）、キーコード1つで表せない動作は undefined
  */
 export function encodeEncoderAction(action: Action): number | undefined {
-  const allowed = action.kind === 'none' || action.kind === 'transparent' || action.kind === 'unsupported'
+  const allowed = action.kind === 'none' || action.kind === 'unsupported'
   return allowed || canPlace(action, 'encoder') ? actionToKeycode(action) : undefined
 }
 
