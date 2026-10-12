@@ -237,6 +237,8 @@ test('ヘッダーの Tap Dance の残り枠数は、編集に合わせて増減
       changes={2}
       onWrite={() => {}}
       onBackups={() => {}}
+      onSaveVil={() => {}}
+      onLoadVil={() => {}}
       onConnect={() => {}}
       onDisconnect={() => {}}
       onDeviceInfo={null}

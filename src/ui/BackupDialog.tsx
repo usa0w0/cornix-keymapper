@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import type { KeyboardSnapshot } from '../device/types.ts'
 import { sameShape, sameSnapshot } from '../model/snapshot.ts'
 import { BACKUP_LIMIT, type BackupItem, type BackupStorage } from '../storage/backup.ts'
+import { snapshotToVil } from '../storage/vil.ts'
+import { downloadText } from './download.ts'
 import { isDevSite } from './site.ts'
+import { NOT_INCLUDED, vilFileName } from './vilFlow.ts'
 import { formatDateTime, storageFailureText, unreadableText } from './writeFlow.ts'
 
 interface Props {
@@ -16,6 +19,8 @@ interface Props {
   /** バックアップの内容を、編集中の状態の出発点に入れる。すぐには書き込まない */
   onRestore: (snapshot: KeyboardSnapshot) => void
   onClose: () => void
+  /** ファイルとして保存させる。省くと、ブラウザーのダウンロード（テスト用） */
+  onDownload?: (name: string, text: string) => void
   /** 開発版の表示にするか。省くと、公開先のパスで決める（テスト用） */
   devSite?: boolean
 }
@@ -30,13 +35,24 @@ function blockedReason(item: Extract<BackupItem, { readable: true }>, baseline: 
 /**
  * 自動バックアップの一覧。ヘッダーの「バックアップ」から開く。
  * 「この状態に戻す」は、すぐには書き込まず、内容を編集中の状態の出発点に入れる（変更点を確かめてから書き込む）。
- * 読み込めないものは、その旨と「削除」を出す。「.vil に書き出す」は置き場所だけ（#16）
+ * 読み込めないものは、その旨と「削除」を出す。「.vil に書き出す」は、そのバックアップを .vil のファイルとして保存させる
  */
-export function BackupDialog({ backups, baseline, source, changes, onRestore, onClose, devSite = isDevSite }: Props) {
+export function BackupDialog({
+  backups,
+  baseline,
+  source,
+  changes,
+  onRestore,
+  onClose,
+  onDownload = downloadText,
+  devSite = isDevSite,
+}: Props) {
   const dialog = useRef<HTMLDialogElement>(null)
   const { uid } = baseline
   const [items, setItems] = useState(() => backups.list(uid))
   const [failure, setFailure] = useState<string | null>(null)
+  // 書き出したファイルの名前
+  const [exported, setExported] = useState<string | null>(null)
   useEffect(() => {
     const element = dialog.current
     element?.showModal()
@@ -45,7 +61,18 @@ export function BackupDialog({ backups, baseline, source, changes, onRestore, on
     return () => element?.close()
   }, [])
 
+  const exportVil = (item: Extract<BackupItem, { readable: true }>) => {
+    const text = snapshotToVil(item.snapshot)
+    setExported(null)
+    if (text === null) return setFailure('書き出せませんでした。バックアップの、機器の識別が読み取れません。')
+    const name = vilFileName(new Date(item.savedAt), 'backup')
+    onDownload(name, text)
+    setFailure(null)
+    setExported(name)
+  }
+
   const remove = (id: string) => {
+    setExported(null)
     const result = backups.remove(uid, id)
     setFailure(result.ok ? null : `削除できませんでした。${storageFailureText(result.reason)}`)
     setItems(backups.list(uid))
@@ -100,8 +127,7 @@ export function BackupDialog({ backups, baseline, source, changes, onRestore, on
                       {blocked && <span className="backups-note">（{blocked}）</span>}
                     </td>
                     <td>
-                      {/* 置き場所だけ。バックアップの .vil への書き出しは #16 */}
-                      <button type="button" disabled title="準備中">
+                      <button type="button" aria-label={`${when} のバックアップを .vil に書き出す`} onClick={() => exportVil(item)}>
                         .vil に書き出す
                       </button>{' '}
                       <button
@@ -125,12 +151,18 @@ export function BackupDialog({ backups, baseline, source, changes, onRestore, on
           {failure}
         </p>
       )}
+      {exported && (
+        <p className="ok" role="status">
+          {exported} に書き出しました。{NOT_INCLUDED}。
+        </p>
+      )}
       <p className="write-note">
         「この状態に戻す」は、すぐには書き込みません。変更点を確かめてから「本体に書き込む」を押します。
         {changes > 0 && `いま編集している内容（${changes} 件）は、戻した設定の上に残ります。`}
         <br />
         バックアップは、開発版とリリース版で別々に保存されます（いま見ているのは{devSite ? '開発版' : 'リリース版'}
-        ）。ブラウザーで、このサイトのデータを消すと、バックアップも消えます。
+        ）。ブラウザーで、このサイトのデータを消すと、バックアップも消えます。残しておきたいものは、.vil
+        に書き出してください。
       </p>
       <div className="dialog-actions">
         <button type="button" className="primary" onClick={onClose}>

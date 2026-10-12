@@ -12,11 +12,13 @@ import {
 } from './session/editState.ts'
 import { continueWithCurrent, interruptedWrite, type InterruptedWrite } from './session/writeSession.ts'
 import { browserBackupStorage, type BackupStorage } from './storage/backup.ts'
+import { snapshotToVil, vilToSnapshot } from './storage/vil.ts'
 import { AppHeader } from './ui/AppHeader.tsx'
 import { BackupDialog } from './ui/BackupDialog.tsx'
 import { ChangeListDialog } from './ui/ChangeListDialog.tsx'
 import { ComboView } from './ui/ComboView.tsx'
 import { DeviceInfoDialog } from './ui/DeviceInfoDialog.tsx'
+import { downloadText } from './ui/download.ts'
 import { editSlotCounts } from './ui/deviceInfo.ts'
 import { EditSessionContext } from './ui/editContext.ts'
 import { InterruptedDialog } from './ui/InterruptedDialog.tsx'
@@ -31,6 +33,8 @@ import { useDeviceRead } from './ui/useDeviceRead.ts'
 import { useLayerView } from './ui/useLayerView.ts'
 import { useLeaveConfirm } from './ui/useLeaveConfirm.ts'
 import { useWriteFlow, type FlowRead } from './ui/useWriteFlow.ts'
+import { VilDialog } from './ui/VilDialog.tsx'
+import { summarizeLoad, VIL_SIZE_LIMIT, type VilScene } from './ui/vilFlow.ts'
 import { WriteDialog } from './ui/WriteDialog.tsx'
 
 type Tab = 'keymap' | 'combo'
@@ -82,6 +86,8 @@ function App({ connector, supported = isWebHidSupported(), backups }: Props) {
   // 接続した機器に残っていた、前回の書き込みの印。利用者が、戻すか、続けるかを選ぶまで持つ
   const [interrupted, setInterrupted] = useState<Exclude<InterruptedWrite, { status: 'none' }> | null>(null)
   const [showBackups, setShowBackups] = useState(false)
+  // .vil の保存と読み込みのダイアログ
+  const [vil, setVil] = useState<VilScene | null>(null)
 
   // 書き込みの流れの中で読み終えた内容を、本体の情報のダイアログ（診断）にも出す。通信の記録には、書き込みの分も入る
   const showRead = ({ device: from, snapshot, since }: FlowRead) =>
@@ -181,6 +187,37 @@ function App({ connector, supported = isWebHidSupported(), backups }: Props) {
     setConfirming(true)
   }
 
+  // 画面の内容（出発点に編集を当てはめた目標）を .vil にしたもの。保存できない時は、その理由
+  const vilSave = !edit
+    ? { blocked: '保存する内容がありません。' }
+    : !target
+      ? {
+          blocked:
+            '書き込めない変更があるので、保存できません。「書き込み」を押すと、その変更と理由が一覧に出ます。その変更を取り消すと、保存できます。',
+        }
+      : { text: snapshotToVil(target) }
+  const saveVil = (name: string) => {
+    if (!vilSave.text) return
+    downloadText(name, vilSave.text)
+    setVil(null)
+  }
+
+  // 選んだ .vil を、出発点に入れる。すぐには書き込まない。読み込めない時は、理由を出し、画面の内容は変えない。
+  // 照合の相手は、基準（この画面に読み込んであるキーボード）。接続が切れている間も読み込める
+  const loadVil = async (file: File) => {
+    if (!edit) return
+    const { name } = file
+    if (file.size > VIL_SIZE_LIMIT) return setVil({ scene: 'failed', name, failure: { reason: 'too-large' } })
+    const text = await file.text().catch(() => null)
+    if (text === null) return setVil({ scene: 'failed', name, failure: { reason: 'unreadable' } })
+    const result = vilToSnapshot(text, edit.baseline)
+    if (!result.ok) return setVil({ scene: 'failed', name, failure: result.failure })
+    // 編集は、読み込んだ設定の上に残る。読み込む前の数を持っておき、読み込んだ後の知らせで、どうなったかを伝える
+    const editsBefore = summarizeLoad(changeList).edits
+    revert({ type: 'replaceSource', source: result.snapshot })
+    setVil({ scene: 'loaded', name, extras: result.extras, editsBefore })
+  }
+
   // 書き込み前に本体の設定が変わっていた時の「本体から読み込み直す」。編集を捨てて、読み直した内容から始め直す
   const reload = (fresh: KeyboardSnapshot) => {
     const traced = writing.traced(fresh)
@@ -210,6 +247,8 @@ function App({ connector, supported = isWebHidSupported(), backups }: Props) {
           changes={changes}
           onWrite={changes > 0 ? () => setConfirming(true) : null}
           onBackups={() => setShowBackups(true)}
+          onSaveVil={() => setVil({ scene: 'save', at: new Date() })}
+          onLoadVil={(file) => void loadVil(file)}
           onConnect={connect}
           onDisconnect={close}
           onDeviceInfo={report ? showInfo : null}
@@ -274,6 +313,20 @@ function App({ connector, supported = isWebHidSupported(), backups }: Props) {
             changes={changes}
             onRestore={restoreBackup}
             onClose={() => setShowBackups(false)}
+          />
+        )}
+        {edit && vil && !pending && idle && (
+          <VilDialog
+            scene={vil}
+            changes={changes}
+            summary={summarizeLoad(changeList)}
+            saveBlocked={vilSave.blocked ?? (vilSave.text === null ? '機器の識別が読み取れないので、保存できません。' : null)}
+            onSave={saveVil}
+            onReview={() => {
+              setVil(null)
+              setConfirming(true)
+            }}
+            onClose={() => setVil(null)}
           />
         )}
         {flow.phase !== 'idle' && (

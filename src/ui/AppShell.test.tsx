@@ -43,6 +43,8 @@ const header = (connection: ConnectionState, options: { supported?: boolean; rea
       changes={options.changes ?? 0}
       onWrite={options.changes ? () => {} : null}
       onBackups={() => {}}
+      onSaveVil={() => {}}
+      onLoadVil={() => {}}
       onConnect={() => {}}
       onDisconnect={() => {}}
       onDeviceInfo={options.read && connection.status === 'connected' ? () => {} : null}
@@ -105,15 +107,17 @@ test('読み出す前のヘッダー: 機器名と「切断」だけを出し、
   expect(html).not.toContain('書き込み')
 })
 
-test('読み出した後のヘッダー: 本体の情報を開くボタン、残り枠数、バックアップ、押せない保存と書き込みのボタンを出す', () => {
+test('読み出した後のヘッダー: 本体の情報を開くボタン、残り枠数、バックアップ、.vil の保存と読み込み、押せない書き込みのボタンを出す', () => {
   const html = header({ status: 'connected', device }, { read: true })
   expect(html).toContain('title="接続中のキーボードの情報を見る">接続済み: Cornix ▾</button>')
   expect(html).toContain('Tap Dance 残り <b>30</b> / 32')
   expect(html).toContain('コンボ 残り <b>32</b> / 32')
   expect(html).toContain('<button type="button" title="自動バックアップの一覧を見る">バックアップ</button>')
-  for (const name of ['.vil に保存', '.vil を読み込む', '書き込み（変更 0 件）']) {
-    expect(html).toMatch(new RegExp(`<button type="button"[^>]*disabled=""[^>]*>${name.replace(/[.()（）]/g, '\\$&')}</button>`))
-  }
+  expect(html).toContain('<button type="button" title="この画面の内容を、Vial と同じ形式のファイルに保存する">.vil に保存</button>')
+  expect(html).toContain('<button type="button" title="Vial やこのサイトで保存したファイルを、この画面に読み込む">.vil を読み込む</button>')
+  // ファイルを選ぶ部品は、見せずに置く
+  expect(html).toContain('<input type="file" accept=".vil,application/json" hidden="" aria-label=".vil ファイルを選ぶ"/>')
+  expect(html).toMatch(/<button type="button" class="primary" disabled=""[^>]*>書き込み（変更 0 件）<\/button>/)
 })
 
 test('読み込み中のカード: いま読んでいるものと、進み具合の棒を出す', () => {
@@ -318,6 +322,8 @@ test('つなぎ直して読み直している間のヘッダー: 読み終える
       changes={1}
       onWrite={() => {}}
       onBackups={() => {}}
+      onSaveVil={() => {}}
+      onLoadVil={() => {}}
       onConnect={() => {}}
       onDisconnect={() => {}}
       onDeviceInfo={null}

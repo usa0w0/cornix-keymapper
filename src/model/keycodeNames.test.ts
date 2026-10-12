@@ -2,7 +2,7 @@ import { expect, test } from 'vitest'
 import type { KeyboardSnapshot } from '../device/types.ts'
 import recorded from '../device/fixtures/cornix/usb.json'
 import vilText from '../device/fixtures/cornix/cornix.vil?raw'
-import { candidates, KEY_CODES, labelOf, LAYER_MODES, type Mod } from './action.ts'
+import { candidates, KEY_CODES, labelOf, LAYER_MODES, type Action, type Mod } from './action.ts'
 import { encodeBehavior } from './encode.ts'
 import { keycodeToName, nameToKeycode } from './keycodeNames.ts'
 import { actionToKeycode } from './keycodes.ts'
@@ -126,7 +126,7 @@ test('このサイトで作れるキーコードは、Vial の名前で書ける
   // タップと長押しの組（MT、LT）
   const mod = (kind: Mod['kind'], side: Mod['side'] = 'left'): Mod => ({ kind, side })
   for (const code of KEY_CODES) {
-    const tap = { kind: 'key', code, mods: [] } as const
+    const tap: Action = { kind: 'key', code, mods: [] }
     for (const hold of [mod('ctrl'), mod('shift'), mod('alt'), mod('gui'), mod('ctrl', 'right'), mod('gui', 'right')]) {
       const encoded = encodeBehavior({ tap, hold: { kind: 'key', mods: [hold] } })
       if (encoded?.feature !== 'mt') expect.fail('MT にならない')
