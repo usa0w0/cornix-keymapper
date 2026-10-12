@@ -182,6 +182,20 @@ test('図に出るキーが、すべて「何もしない」か透過のレイ�
   expect(cornix.keymap.map((_, layer) => isLayerEmpty(cornix, layer, cornixKeys))).not.toContain(true)
 })
 
+test('4つとも空の枠を指す Tap Dance だけのレイヤーは、図と同じく空とする', () => {
+  const snapshot = tiny([
+    [0x5700, 0, 0x0001, 0],
+    [0x5700, 0, 0, 0],
+  ])
+  const keys = placeKeys(snapshot.layout)
+  // 枠 0 に中身がある間は、空ではない
+  expect(isLayerEmpty(snapshot, 0, keys)).toBe(false)
+  const cleared = { ...snapshot, tapDances: [{ onTap: 0, onHold: 0, onDoubleTap: 0, onTapHold: 0, tappingTerm: 250 }] }
+  expect(keyViewOf(cleared, 0, key(0), 'us').state).toBe('none')
+  expect(isLayerEmpty(cleared, 0, keys)).toBe(true)
+  expect(isLayerEmpty(cleared, 1, keys)).toBe(true)
+})
+
 test('図に出ない場所（行列にあって、レイアウト定義にないキー）は、空かどうかの判定に入れない', () => {
   const snapshot = tiny([[0, 0, 0, 0x0004]])
   const keys = placeKeys({ ...snapshot.layout, raw: { layouts: { keymap: [['0,0', '0,1', '1,0']] } } })

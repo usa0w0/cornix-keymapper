@@ -11,7 +11,7 @@ import {
   type KeyBehavior,
 } from '../model/behavior.ts'
 import { decodeKey } from '../model/decode.ts'
-import { customKeycodesOf, keycodeToAction, KC_TRANSPARENT, type CustomKeycode } from '../model/keycodes.ts'
+import { customKeycodesOf, keycodeToAction, type CustomKeycode } from '../model/keycodes.ts'
 import type { PlacedKey } from '../model/layout.ts'
 import { effectiveBelow } from '../model/transparent.ts'
 
@@ -98,13 +98,16 @@ export function slotsName(slots: SlotLabels): string {
   return filled.map((slot) => `${BEHAVIOR_SLOT_NAMES[slot]}: ${slots[slot]!.full}`).join(' ／ ')
 }
 
-/** キーが1つも割り当てられていないレイヤーか。図に出るキーが、すべて「何もしない」か透過の時 */
+/**
+ * キーが1つも割り当てられていないレイヤーか。図に出るキーが、すべて「何もしない」か透過の時。
+ * 図の見え方と合わせるため、欄に展開した後の動作で見る（4つとも空の枠を指す Tap Dance も、何もしないキー）
+ */
 export function isLayerEmpty(snapshot: KeyboardSnapshot, layer: number, keys: readonly PlacedKey[]): boolean {
   return keys
     .filter((key) => key.kind === 'key')
     .every((key) => {
-      const keycode = keycodeAt(snapshot, layer, targetOf(key)) ?? 0
-      return keycode === 0 || keycode === KC_TRANSPARENT
+      const behavior = decodeKey(keycodeAt(snapshot, layer, targetOf(key)) ?? 0, snapshot.tapDances)
+      return isNone(behavior) || isTransparent(behavior)
     })
 }
 
