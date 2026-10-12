@@ -10,7 +10,9 @@ const LEGENDS: readonly Legend[] = ['us', 'jis']
 
 /** キーマップの表示。レイヤーの行（番号、凡例を開く「?」、刻印の切り替え）と、選んだレイヤーのキーボード図 */
 export function KeymapView({ snapshot }: { snapshot: KeyboardSnapshot }) {
-  const [layer, setLayer] = useState(0)
+  const [selectedLayer, setLayer] = useState(0)
+  // 読み直してレイヤー数が減った時に、ないレイヤーを指したままにしない
+  const layer = Math.min(selectedLayer, Math.max(snapshot.keymap.length - 1, 0))
   const [legend, setLegend] = useState<Legend>('us')
   const legendId = useId()
   const keys = useMemo(() => placeKeys(snapshot.layout), [snapshot.layout])

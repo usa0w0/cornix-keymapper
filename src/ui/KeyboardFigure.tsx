@@ -32,12 +32,16 @@ export function KeyboardFigure({ keys, viewOf }: { keys: readonly PlacedKey[]; v
           const target = targetOf(key)
           const view = viewOf(target)
           const shape = key.kind === 'encoder' ? ` encoder encoder-${key.direction}` : ''
+          const name = `${targetName(key)}: ${titleOf(view)}`
           return (
             <div
               key={targetId(target)}
               className={`key state-${view.state}${shape}`}
               style={placeOf(key, box)}
-              title={`${targetName(key)}: ${titleOf(view)}`}
+              // 押せる部品になるまでは、場所と動作をまとめた1つの絵として読み上げさせる
+              role="img"
+              aria-label={name}
+              title={name}
             >
               {key.kind === 'encoder' && (
                 <span className="encoder-turn">{key.direction === 'left' ? '↺ 左回し' : '右回し ↻'}</span>

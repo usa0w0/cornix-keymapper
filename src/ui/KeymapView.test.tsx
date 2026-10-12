@@ -22,7 +22,9 @@ test('レイヤーの行と、レイアウト定義どおりの数のキーと�
   expect(count(html, 'encoder-right')).toBe(2)
   // キー1つぶんは 64px で、すき間が 4px
   expect(html).toContain('left:192px;top:0;width:60px;height:60px')
-  expect(html).toContain('エンコーダー 1 の左回し: マウスのホイールを上へ')
+  // 場所と動作は、マウスを載せなくても読み上げられる名前として持つ
+  expect(html).toContain('role="img" aria-label="エンコーダー 1 の左回し: マウスのホイールを上へ"')
+  expect(html).toContain('role="img" aria-label="行 0・列 1 のキー: Q"')
 })
 
 test('キーの位置を読み取れない時は、図の代わりにその旨を出す', () => {
