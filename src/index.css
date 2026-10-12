@@ -611,7 +611,8 @@ main {
   font-size: 0.8rem;
 }
 
-/* エンコーダーは、上に回す向きを出すので、「透過」の印は下に出す */
+/* エンコーダーは、上に回す向きを出すので、「透過」の印と鍵の印は下に出す */
+.keymap .key.encoder .mark-locked,
 .keymap .key.encoder .mark-transparent {
   top: auto;
   bottom: 4px;
