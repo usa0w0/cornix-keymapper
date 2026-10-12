@@ -312,54 +312,13 @@
   white-space: nowrap;
 }
 
-.proto .legend,
-.proto .edit-dialog {
+.proto .edit,
+.proto .legend {
+  margin: 0 1rem 1rem;
   padding: 0.8rem 1rem;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface);
-}
-
-.proto .edit-dialog {
-  width: min(30rem, 90vw);
-  padding: 1rem 1.2rem;
-  color: var(--text);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.25);
-}
-
-.proto .edit-dialog::backdrop {
-  background: rgb(0 0 0 / 0.25);
-}
-
-.proto .edit-head {
-  display: flex;
-  align-items: center;
-  gap: 0.8rem;
-  margin-bottom: 0.8rem;
-}
-
-.proto .edit-head .key {
-  position: relative;
-  flex: none;
-  width: 60px;
-  height: 60px;
-  box-sizing: border-box;
-}
-
-.proto .edit-head h2 {
-  margin: 0;
-}
-
-.proto .edit-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 1rem;
-}
-
-.proto .figure-hint {
-  margin: 0 1rem 1rem;
-  color: var(--muted);
-  text-align: center;
 }
 
 .proto .legend {
@@ -403,18 +362,24 @@
 
 .proto .fields {
   display: grid;
-  gap: 0.5rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.proto .fields-one {
+  grid-template-columns: minmax(0, 24rem);
 }
 
 .proto .field {
   display: grid;
-  grid-template-columns: 7rem 1fr 2rem;
-  align-items: center;
-  gap: 0.4rem;
+  grid-template-columns: 1fr auto;
+  gap: 0.2rem;
 }
 
 .proto .field-name {
+  grid-column: 1 / -1;
   color: var(--muted);
+  font-size: 0.8rem;
 }
 
 .proto .field-value {
@@ -451,7 +416,8 @@
   box-sizing: border-box;
 }
 
-
-.proto .edit-head h2 {
-  margin: 0;
+@media (max-width: 900px) {
+  .proto .fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
