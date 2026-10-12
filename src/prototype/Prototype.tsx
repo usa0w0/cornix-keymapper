@@ -1,5 +1,5 @@
 // 画面デザインの試作（#22）。偽の機器のデータを表示するだけで、編集や書き込みはまだ動かない
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { KeyboardSnapshot } from '../device/types.ts'
 import { bounds, placeKeys, type PlacedKey } from './kle.ts'
 import { SLOT_NAMES, viewKey, viewKeyAt, type KeyView, type Legend, type Slot } from './labels.ts'
@@ -93,7 +93,10 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
 
           <KeyboardFigure snapshot={snapshot} layer={layer} legend={legend} selection={selection} onSelect={setSelection} />
 
-          <EditPanel snapshot={snapshot} layer={layer} legend={legend} selection={selection} cols={cols} />
+          <p className="figure-hint">キーをクリックすると、動作を変えるダイアログが開きます。</p>
+          <EditDialog open={selection !== null} onClose={() => setSelection(null)}>
+            <EditPanel snapshot={snapshot} layer={layer} legend={legend} selection={selection} cols={cols} />
+          </EditDialog>
           <Legend />
         </>
       )}
@@ -203,6 +206,34 @@ function KeyFace({ view, changed }: { view: KeyView; changed?: boolean }) {
   )
 }
 
+/** 選んだキーの編集欄を、ダイアログで出す。外側のクリック、Esc、「閉じる」で閉じる */
+function EditDialog({ open, onClose, children }: { open: boolean; onClose: () => void; children: ReactNode }) {
+  const ref = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const dialog = ref.current
+    if (!dialog) return
+    if (open && !dialog.open) dialog.showModal()
+    if (!open && dialog.open) dialog.close()
+  }, [open])
+  return (
+    <dialog
+      ref={ref}
+      className="edit-dialog"
+      onClose={onClose}
+      onClick={(event) => {
+        if (event.target === ref.current) ref.current.close()
+      }}
+    >
+      {children}
+      <div className="edit-actions">
+        <button type="button" onClick={() => ref.current?.close()}>
+          閉じる
+        </button>
+      </div>
+    </dialog>
+  )
+}
+
 function EditPanel(props: {
   snapshot: KeyboardSnapshot
   layer: number
@@ -211,13 +242,7 @@ function EditPanel(props: {
   cols: number
 }) {
   const { snapshot, layer, legend, selection, cols } = props
-  if (!selection) {
-    return (
-      <section className="edit" aria-label="選んだキー">
-        <p className="edit-empty">キーをクリックすると、ここで動作を変えられます。</p>
-      </section>
-    )
-  }
+  if (!selection) return null
   if (selection.kind === 'encoder') {
     const code = snapshot.encoders[layer][selection.encoder][selection.direction]
     const view = viewKey(code, snapshot, legend)
@@ -235,9 +260,14 @@ function EditPanel(props: {
   const view = viewKeyAt(snapshot, layer, selection.index, legend)
   return (
     <section className="edit" aria-label="選んだキー">
-      <h2>
-        レイヤー {layer} ・ 行 {Math.floor(selection.index / cols)} 列 {selection.index % cols} のキー
-      </h2>
+      <div className="edit-head">
+        <span className={`key state-${view.state}`}>
+          <KeyFace view={view} />
+        </span>
+        <h2>
+          レイヤー {layer} ・ 行 {Math.floor(selection.index / cols)} 列 {selection.index % cols} のキー
+        </h2>
+      </div>
       {view.state === 'locked' && (
         <p className="edit-note">
           🔒 このキーの動作は、このサイトでは編集できません。内容はそのまま残ります。別の動作で上書きすることはできます。
