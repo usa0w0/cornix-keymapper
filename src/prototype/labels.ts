@@ -189,8 +189,27 @@ export const CATEGORIES: Category[] = [
   { id: 'media', name: 'メディア・その他', codes: [168, 170, 169, 217, 218, 211, 70] },
 ]
 
-/** ショートカットで、修飾キーと組み合わせるキーの候補 */
-export const SHORTCUT_KEYS = [...range(4, 29), ...range(30, 39), 40, 41, 42, 43, 44, 76, 80, 81, 82, 79, ...range(58, 69)]
+/** 動作を選ぶ部品に出す、標準的なキーボード（US 配列、行ごとに少しずつずれた並び）。[キーコード, 幅] の列。0 はすき間 */
+export const PICKER_KEYBOARD: [number, number][][] = [
+  [[41, 1], [0, 1], ...range(58, 61).map((c): [number, number] => [c, 1]), [0, 0.5], ...range(62, 65).map((c): [number, number] => [c, 1]), [0, 0.5], ...range(66, 69).map((c): [number, number] => [c, 1])],
+  [[53, 1], ...range(30, 39).map((c): [number, number] => [c, 1]), [45, 1], [46, 1], [42, 2]],
+  [[43, 1.5], ...[20, 26, 8, 21, 23, 28, 24, 12, 18, 19, 47, 48].map((c): [number, number] => [c, 1]), [49, 1.5]],
+  [[57, 1.75], ...[4, 22, 7, 9, 10, 11, 13, 14, 15, 51, 52].map((c): [number, number] => [c, 1]), [40, 2.25]],
+  [[225, 2.25], ...[29, 27, 6, 25, 5, 17, 16, 54, 55, 56].map((c): [number, number] => [c, 1]), [229, 2.75]],
+  [[224, 1.25], [227, 1.25], [226, 1.25], [145, 1.25], [44, 5], [144, 1.25], [230, 1.25], [231, 1.25], [228, 1.25]],
+]
+
+/** キーボードの右に置く、移動のキー。行は PICKER_KEYBOARD と同じ高さに並べる */
+export const PICKER_NAVIGATION: [number, number][][] = [
+  [],
+  [[73, 1], [74, 1], [75, 1]],
+  [[76, 1], [77, 1], [78, 1]],
+  [],
+  [[0, 1], [82, 1]],
+  [[80, 1], [81, 1], [79, 1]],
+]
+
+export const isModifier = (code: number) => code >= 224 && code <= 231
 
 export const LAYER_MODE_CHOICES: { base: number; name: string; momentary: boolean }[] = [
   { base: 0x5220, name: '押している間だけ', momentary: true },

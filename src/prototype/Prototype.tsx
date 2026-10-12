@@ -6,9 +6,11 @@ import {
   behaviorOf,
   CATEGORIES,
   inheritedView,
+  isModifier,
   labelOf,
   LAYER_MODE_CHOICES,
-  SHORTCUT_KEYS,
+  PICKER_KEYBOARD,
+  PICKER_NAVIGATION,
   SLOT_NAMES,
   viewBehavior,
   type Behavior,
@@ -20,6 +22,8 @@ import './prototype.css'
 
 const UNIT = 64
 const GAP = 4
+/** 動作を選ぶ部品のキーボードの、キー1つぶんの幅 */
+const BOARD_UNIT = 44
 const SLOTS: Slot[] = ['tap', 'hold', 'doubleTap', 'tapHold']
 /** キーの上で、タップ以外の欄に付ける短い印 */
 const SLOT_TAGS: Record<Slot, string> = { tap: '', hold: '長押し', doubleTap: '2回', tapHold: '2回長' }
@@ -36,7 +40,14 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
     const requested = Number(new URLSearchParams(location.search).get('layer'))
     return Number.isInteger(requested) && requested >= 0 && requested < snapshot.keymap.length ? requested : 0
   })
-  const [selection, setSelection] = useState<Selection | null>(null)
+  // ?key=26 のように、最初に選んでおくキーも URL で選べる
+  const [selection, setSelection] = useState<Selection | null>(() => {
+    const requested = new URLSearchParams(location.search).get('key')
+    const index = Number(requested)
+    return requested !== null && Number.isInteger(index) && index >= 0 && index < snapshot.keymap[0].length
+      ? { kind: 'key', index }
+      : null
+  })
   const [legend, setLegend] = useState<Legend>(() =>
     new URLSearchParams(location.search).get('legend') === 'jis' ? 'jis' : 'us',
   )
@@ -313,19 +324,16 @@ function EditPanel(props: {
           return (
             <div className="field" key={slot}>
               <span className="field-name">{isEncoder ? '回した時' : SLOT_NAMES[slot]}</span>
-              <button
-                type="button"
-                className={`field-value ${label ? '' : 'unset'}`}
-                aria-pressed={active === slot}
-                onClick={() => setActive(slot)}
-              >
-                {label?.full ?? (isEmptyTap ? emptyName : '（なし）')}
-              </button>
-              {label && (
-                <button type="button" className="quiet" aria-label={`${SLOT_NAMES[slot]}を消す`} onClick={() => clear(slot)}>
-                  ×
+              <div className={`field-box ${label ? '' : 'unset'} ${active === slot ? 'active' : ''}`}>
+                <button type="button" className="field-value" aria-pressed={active === slot} onClick={() => setActive(slot)}>
+                  {label?.full ?? (isEmptyTap ? emptyName : '（なし）')}
                 </button>
-              )}
+                {label && (
+                  <button type="button" className="field-clear" aria-label={`${SLOT_NAMES[slot]}を消す`} title="この欄を消す" onClick={() => clear(slot)}>
+                    ×
+                  </button>
+                )}
+              </div>
             </div>
           )
         })}
@@ -356,19 +364,18 @@ function ActionPicker(props: {
   onPickEmpty: (state: 'none' | 'transparent') => void
 }) {
   const { snapshot, legend, slot, slotName, layerCount, current, onPick, onPickEmpty } = props
-  const [category, setCategory] = useState('letters')
+  const [category, setCategory] = useState('keyboard')
   const [query, setQuery] = useState('')
   const [mods, setMods] = useState(0)
   const [mode, setMode] = useState(0x5260)
   const tabs = [
-    ...CATEGORIES.slice(0, 4).map(({ id, name }) => ({ id, name })),
-    { id: 'shortcut', name: 'ショートカット' },
+    { id: 'keyboard', name: 'キーボード' },
     { id: 'layer', name: 'レイヤー切り替え' },
-    ...CATEGORIES.slice(4).map(({ id, name }) => ({ id, name })),
+    { id: 'media', name: 'メディア・その他' },
     // 「透過」と「何もしない」は、タップの欄にだけ入れられる
     ...(slot === 'tap' ? [{ id: 'empty', name: '何もしない・透過' }] : []),
   ]
-  const shown = tabs.some((t) => t.id === category) ? category : 'letters'
+  const shown = tabs.some((t) => t.id === category) ? category : 'keyboard'
   // 「押している間だけ」は、長押しの欄とタップ後長押しの欄にだけ入れられる
   const modes = LAYER_MODE_CHOICES.filter((choice) => choice.momentary === (slot === 'hold' || slot === 'tapHold'))
   const shownMode = modes.some((choice) => choice.base === mode) ? mode : modes[0].base
@@ -413,7 +420,7 @@ function ActionPicker(props: {
               </button>
             ))}
           </div>
-          {shown === 'shortcut' ? (
+          {shown === 'keyboard' ? (
             <>
               <div className="picker-row">
                 <span>一緒に押す修飾キー</span>
@@ -422,20 +429,39 @@ function ActionPicker(props: {
                     {name}
                   </button>
                 ))}
-                {mods === 0 && <span className="picker-empty">修飾キーを1つ以上選んでから、下のキーを選びます。</span>}
+                <span className="picker-empty">
+                  選ぶと、ショートカット（例: Ctrl + C）や、Shift で出る記号（例: !）になります。
+                </span>
               </div>
-              <div className="chips">
-                {SHORTCUT_KEYS.map((code) => (
-                  <button
-                    type="button"
-                    key={code}
-                    className="chip-key"
-                    disabled={mods === 0}
-                    aria-pressed={current === ((mods << 8) | code)}
-                    onClick={() => onPick((mods << 8) | code)}
-                  >
-                    {labelOf(code, snapshot, legend).short}
-                  </button>
+              <div className="board">
+                {[PICKER_KEYBOARD, PICKER_NAVIGATION].map((rows, block) => (
+                  <div className="board-block" key={block}>
+                    {rows.map((row, index) => (
+                      <div className="board-row" key={index}>
+                        {row.map(([code, width], position) => {
+                          if (code === 0) return <span key={position} style={{ width: width * BOARD_UNIT }} />
+                          // 修飾キーそのものは、組み合わせずに単体で入れる
+                          const picked = mods !== 0 && !isModifier(code) ? (mods << 8) | code : code
+                          const plain = labelOf(code, snapshot, legend)
+                          const face = mods === 2 && plain.shifted ? plain.shifted : plain.short
+                          return (
+                            <button
+                              type="button"
+                              key={position}
+                              className="board-key"
+                              style={{ width: width * BOARD_UNIT - 4 }}
+                              aria-pressed={current === picked}
+                              title={labelOf(picked, snapshot, legend).full}
+                              onClick={() => onPick(picked)}
+                            >
+                              {mods === 0 && plain.shifted && <small>{plain.shifted}</small>}
+                              {face}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    ))}
+                  </div>
                 ))}
               </div>
             </>
@@ -475,9 +501,7 @@ function ActionPicker(props: {
               <span className="picker-empty">どちらも、ほかの欄（長押しなど）とは組み合わせられません。</span>
             </div>
           ) : (
-            <div className="chips">
-              {CATEGORIES.find((c) => c.id === shown)!.codes.map((code) => chip(code, shown !== 'letters' && shown !== 'symbols'))}
-            </div>
+            <div className="chips">{CATEGORIES.find((c) => c.id === 'media')!.codes.map((code) => chip(code, true))}</div>
           )}
         </>
       )}

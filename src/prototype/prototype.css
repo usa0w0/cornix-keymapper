@@ -471,10 +471,89 @@
   font-size: 0.8rem;
 }
 
-.proto .field-value[aria-pressed='true'] {
+.proto .field {
+  display: block;
+}
+
+.proto .field-name {
+  display: block;
+}
+
+.proto .field-box {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.proto .field-box.unset {
+  border-style: dashed;
+}
+
+.proto .field-box.active {
   border-color: var(--accent);
   border-style: solid;
   box-shadow: 0 0 0 2px var(--accent);
+}
+
+.proto .field-box button {
+  border: none;
+  border-radius: 0;
+  background: none;
+}
+
+.proto .field-box .field-value {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.proto .field-box.unset .field-value {
+  color: var(--muted);
+}
+
+.proto .field-box .field-clear {
+  padding: 0 0.7rem;
+  border-left: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.proto .field-box .field-clear:hover {
+  background: var(--key-none);
+  color: var(--text);
+}
+
+.proto .board {
+  display: flex;
+  gap: 1.2rem;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
+}
+
+.proto .board-row {
+  display: flex;
+  gap: 4px;
+  height: 44px;
+  margin-bottom: 4px;
+}
+
+.proto .picker button.board-key {
+  position: relative;
+  flex: none;
+  padding: 0;
+  border-radius: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.proto .board-key small {
+  position: absolute;
+  top: 1px;
+  left: 4px;
+  color: var(--muted);
+  font-size: 9px;
 }
 
 .proto .picker {
