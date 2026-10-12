@@ -372,6 +372,10 @@
   gap: 0.8rem;
 }
 
+.proto .edit-caution {
+  color: var(--changed);
+}
+
 .proto button.switch {
   display: inline-flex;
   align-items: center;

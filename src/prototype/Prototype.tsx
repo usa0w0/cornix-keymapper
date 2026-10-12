@@ -53,7 +53,11 @@ interface Change {
   undo: () => void
 }
 
-/** 2つのキーの中身が同じかを比べるための文字列 */
+/**
+ * 2つのキーの中身が同じかを比べるための文字列。
+ * 試作では、欄ごとの動作が同じなら同じキーとして扱う。本実装では、設計どおり本体のキーコードそのもので比べる
+ * （中身が同じでも、Tap Dance の枠が違えば別のキーコードになる）
+ */
 const signature = (behavior: Behavior) =>
   SLOTS.map((slot) => behavior.slots[slot] ?? '').join('/')
 
@@ -95,11 +99,25 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
   })
   const connected = !['disconnected', 'reading', 'read-failed', 'lost', 'unsupported'].includes(scene)
   const hasSettings = !['disconnected', 'reading', 'read-failed', 'unsupported'].includes(scene)
-  const [combos, setCombos] = useState<Combo[]>([])
+  // 本体に入っているコンボを、最初から一覧に出す
+  const [combos, setCombos] = useState<Combo[]>(() =>
+    snapshot.combos.flatMap((combo, index) =>
+      combo.output === 0
+        ? []
+        : [
+            {
+              id: index,
+              keys: combo.keys.filter((code) => code !== 0).map((code) => behaviorOf(code, snapshot)),
+              output: combo.output,
+              saved: true,
+            },
+          ],
+    ),
+  )
   // 追加中、または変更中のコンボ
   const [draft, setDraft] = useState<Combo | null>(null)
   const usedTapDances = snapshot.tapDances.filter((t) => t.onTap || t.onHold || t.onDoubleTap || t.onTapHold).length
-  const usedCombos = snapshot.combos.filter((c) => c.output !== 0).length + combos.length
+  const usedCombos = combos.length
   const unsavedCombos = combos.filter((combo) => !combo.saved)
   const changes = Object.keys(edits).length + unsavedCombos.length
 
@@ -288,6 +306,9 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
               behavior={behaviorAt(layer, selection)}
               view={viewAt(layer, selection)}
               changed={editKey(layer, selection) in edits}
+              usedByCombos={combos.filter((combo) =>
+                combo.keys.some((key) => signature(key) === signature(baseAt(layer, selection))),
+              ).length}
               onChange={(behavior) => setBehavior(selection, behavior)}
             />
           ) : (
@@ -774,9 +795,11 @@ function EditPanel(props: {
   behavior: Behavior
   view: KeyView
   changed: boolean
+  /** このキーの、変える前の中身を使っているコンボの数 */
+  usedByCombos: number
   onChange: (behavior: Behavior | null) => void
 }) {
-  const { snapshot, layer, legend, selection, behavior, view, changed, onChange } = props
+  const { snapshot, layer, legend, selection, behavior, view, changed, usedByCombos, onChange } = props
   const isEncoder = selection.kind === 'encoder'
   const [active, setActive] = useState<Slot>('tap')
   const { cols } = snapshot.layout
@@ -806,6 +829,11 @@ function EditPanel(props: {
           </button>
         )}
       </div>
+      {usedByCombos > 0 && (
+        <p className="edit-note edit-caution">
+          このキーは、コンボ {usedByCombos} 件に使われています。動作を変えると、そのコンボはこのキーでは働かなくなります。
+        </p>
+      )}
       {view.state === 'locked' && (
         <p className="edit-note">
           🔒 このキーの動作は、このサイトでは編集できません。内容はそのまま残ります。別の動作で上書きすることはできます。
@@ -897,7 +925,11 @@ function ActionPicker(props: {
   }
   const needle = query.trim().toLowerCase()
   const found = needle
-    ? [...new Set(CATEGORIES.flatMap((c) => c.codes))].filter((code) => {
+    ? [
+        ...new Set(CATEGORIES.flatMap((c) => c.codes)),
+        // レイヤー切り替えも探せるようにする。出すのは、この欄に入れられる切り替え方だけ
+        ...modes.flatMap((choice) => Array.from({ length: layerCount }, (_, n) => choice.base + n)),
+      ].filter((code) => {
         const label = labelOf(code, snapshot, legend)
         return label.short.toLowerCase().includes(needle) || label.full.toLowerCase().includes(needle)
       })
