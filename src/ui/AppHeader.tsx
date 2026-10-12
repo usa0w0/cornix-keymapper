@@ -10,8 +10,10 @@ interface Props {
   supported: boolean
   /** 読み込んだ内容がある時の、残り枠数。1回も読み出していなければ null。接続が切れても出し続ける */
   slots: { tapDance: SlotCount; combo: SlotCount } | null
-  /** 編集の数 */
+  /** 変更の件数（変更点の一覧の行数） */
   changes: number
+  /** 変更点の確認のダイアログを開く。変更がない間は null */
+  onWrite: (() => void) | null
   onConnect: () => void
   onDisconnect: () => void
   /** 本体の情報のダイアログを開く。接続中の機器を読み終えるまでは null */
@@ -19,7 +21,7 @@ interface Props {
 }
 
 /** ヘッダー。タイトル、接続の状態、残り枠数と、保存・書き込みのボタン */
-export function AppHeader({ connection, supported, slots, changes, onConnect, onDisconnect, onDeviceInfo }: Props) {
+export function AppHeader({ connection, supported, slots, changes, onWrite, onConnect, onDisconnect, onDeviceInfo }: Props) {
   return (
     <header className="app-header">
       <h1>
@@ -57,7 +59,7 @@ export function AppHeader({ connection, supported, slots, changes, onConnect, on
           <span className="slots">
             コンボ 残り <b>{slots.combo.free}</b> / {slots.combo.total}
           </span>
-          {/* ここから下の4つは置き場所だけ。中身は、バックアップと書き込みが #15、.vil が #16。件数は、編集の数（変更点の一覧は #14） */}
+          {/* 次の3つは置き場所だけ。中身は、バックアップが #15、.vil が #16 */}
           <button type="button" disabled title="準備中">
             バックアップ
           </button>
@@ -67,7 +69,14 @@ export function AppHeader({ connection, supported, slots, changes, onConnect, on
           <button type="button" disabled title="準備中">
             .vil を読み込む
           </button>
-          <button type="button" className="primary" disabled title="準備中">
+          {/* 押すと、変更点の確認のダイアログが出る。接続が切れている間も、変更点を見て、取り消せる */}
+          <button
+            type="button"
+            className="primary"
+            disabled={!onWrite}
+            title={onWrite ? '変更点を確かめる' : '変更はありません'}
+            onClick={onWrite ?? undefined}
+          >
             書き込み（変更 {changes} 件）
           </button>
         </>

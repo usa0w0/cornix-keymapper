@@ -1,8 +1,16 @@
 import { useMemo, useReducer, useRef, useState } from 'react'
 import { isWebHidSupported } from './browserSupport.ts'
 import type { DeviceConnector, KeyboardDevice } from './device/types.ts'
-import { countEdits, EMPTY_SESSION, hasUnwrittenChanges, sessionReducer, type ReloadChoice } from './session/editState.ts'
+import { listChanges } from './model/diff.ts'
+import {
+  EMPTY_SESSION,
+  hasUnwrittenChanges,
+  sessionReducer,
+  type ReloadChoice,
+  type SessionAction,
+} from './session/editState.ts'
 import { AppHeader } from './ui/AppHeader.tsx'
+import { ChangeListDialog } from './ui/ChangeListDialog.tsx'
 import { ComboView } from './ui/ComboView.tsx'
 import { DeviceInfoDialog } from './ui/DeviceInfoDialog.tsx'
 import { editSlotCounts } from './ui/deviceInfo.ts'
@@ -47,7 +55,12 @@ function App({ connector, supported = isWebHidSupported() }: Props) {
   const info = useRef<HTMLDialogElement>(null)
   const report = reading?.status === 'done' ? reading.report : null
   const { edit, pending } = session
-  const changes = edit ? countEdits(edit) : 0
+  // 変更点の一覧。1行が取り消しの単位で、ヘッダーなどに出す件数は、この行数
+  const changeList = useMemo(() => (edit ? listChanges(edit, shown.legend) : []), [edit, shown.legend])
+  const changes = changeList.length
+  const [confirming, setConfirming] = useState(false)
+  // 変更点の一覧から取り消した回数。キーマップのタブが、共有中のキーの確認への答えを忘れるのに使う
+  const [reverts, setReverts] = useState(0)
   // 残り枠数は、編集を当てはめた後の数。編集に合わせて増減する
   const slots = useMemo(() => edit && editSlotCounts(edit), [edit])
 
@@ -71,6 +84,11 @@ function App({ connector, supported = isWebHidSupported() }: Props) {
     dispatch({ type: 'resolve', choice: 'cancel' })
     const connected = await open()
     if (connected) await load(connected)
+  }
+
+  const revert = (action: SessionAction) => {
+    dispatch(action)
+    setReverts((count) => count + 1)
   }
 
   const choose = (choice: ReloadChoice) => {
@@ -97,6 +115,7 @@ function App({ connector, supported = isWebHidSupported() }: Props) {
           supported={supported}
           slots={slots}
           changes={changes}
+          onWrite={changes > 0 ? () => setConfirming(true) : null}
           onConnect={connect}
           onDisconnect={close}
           onDeviceInfo={report ? showInfo : null}
@@ -113,7 +132,7 @@ function App({ connector, supported = isWebHidSupported() }: Props) {
         <main>
           {edit ? (
             tab === 'keymap' ? (
-              <KeymapView state={edit} onAction={dispatch} shown={shown} />
+              <KeymapView state={edit} onAction={dispatch} shown={shown} reverts={reverts} />
             ) : (
               <ComboView state={edit} onAction={dispatch} shown={shown} />
             )
@@ -141,6 +160,10 @@ function App({ connector, supported = isWebHidSupported() }: Props) {
               dispatch({ type: 'read', snapshot: next.snapshot })
             }}
           />
+        )}
+        {/* 読み直した内容についての選択待ちの間は、編集を受け付けないので、出さない */}
+        {edit && confirming && !pending && (
+          <ChangeListDialog state={edit} changes={changeList} onAction={revert} onClose={() => setConfirming(false)} />
         )}
         {device && edit && pending && <ReloadDialog pending={pending} changes={changes} onChoose={choose} />}
       </div>

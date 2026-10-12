@@ -4,6 +4,7 @@ import { cornixSnapshot, createFakeCornix } from '../device/fake/cornix.ts'
 import type { Action } from '../model/action.ts'
 import type { KeyBehavior } from '../model/behavior.ts'
 import { decodeKey } from '../model/decode.ts'
+import { listChanges, writeOperations } from '../model/diff.ts'
 import { EMPTY_EDITS, type Edits } from '../model/edits.ts'
 import { customKeycodesOf, keycodeToAction } from '../model/keycodes.ts'
 import {
@@ -24,6 +25,7 @@ import {
   markWritten,
   reapplyEdits,
   replaceSource,
+  revertAll,
   revertEdit,
   revertSource,
   sameSnapshot,
@@ -37,6 +39,7 @@ import {
   tryEditKeysTogether,
   tryRevertEdit,
   type EditSession,
+  type EditState,
   type SessionAction,
 } from './editState.ts'
 
@@ -954,4 +957,90 @@ test('共有: エンコーダーも同じ枠を指している時の「連動し
   // エンコーダーを変えた後は、元の枠が空くので、通る
   const freed = editEncoder(loaded, 4, 1, 'left', VOLUME_UP)
   expect(tryEditKeysTogether(freed, keys, A_ESC).blocked).toBeNull()
+})
+
+// ---- 変更点の一覧（model/diff.ts）とのつながり ----
+
+/** キー、連動して変えたキーの組、エンコーダー、コンボ（追加・変更・削除）を変えた状態 */
+function variouslyEdited(): EditState {
+  let state = loadSnapshot(
+    altered((snapshot) => {
+      snapshot.combos[0] = { keys: [0x04, 0x05, 0, 0], output: 0x29 }
+      snapshot.combos[1] = { keys: [0x06, 0x07, 0, 0], output: 0x2a }
+    }),
+  )
+  state = editKey(state, 0, 8, { tap: B })
+  state = editKey(state, 3, 9, { tap: A, doubleTap: B })
+  state = editKeysTogether(state, sharedKeys(state, { layer: 0, key: 26 }), { tap: B, tapHold: A })
+  state = editEncoder(state, 0, 0, 'left', A)
+  state = editEncoder(state, 0, 0, 'right', B)
+  state = addCombo(state, { keys: [0x08, 0x09], output: A })
+  state = editCombo(state, { slot: 0 }, { keys: [0x04, 0x06], output: B })
+  return editCombo(state, { slot: 1 }, null)
+}
+
+test('変更点の一覧の行数は、編集の数と同じ。1行が、取り消しの単位', () => {
+  let state = variouslyEdited()
+  expect(countEdits(state)).toBe(8)
+  expect(listChanges(state)).toHaveLength(8)
+  // 出発点を入れ替えると、全体で1行増える
+  const fromFile = structuredClone(state.baseline)
+  fromFile.keymap[5][5] = 0x04
+  const replaced = replaceSource(state, fromFile)
+  expect(listChanges(replaced)).toHaveLength(countEdits(replaced))
+  expect(countEdits(replaced)).toBe(9)
+
+  // 一覧の行を1つずつ取り消すと、1件ずつ減って、最後は編集がなくなる
+  for (let left = 8; left > 0; left--) {
+    const [change] = listChanges(state)
+    if (change.undo.kind !== 'edit') throw new Error('出発点は入れ替えていない')
+    const { state: next, blocked } = tryRevertEdit(state, change.undo.place)
+    expect(blocked).toBeNull()
+    state = next
+    expect(countEdits(state)).toBe(left - 1)
+    expect(listChanges(state)).toHaveLength(left - 1)
+  }
+  expect(hasUnwrittenChanges(state)).toBe(false)
+  expect(buildTarget(state)).toEqual(state.baseline)
+})
+
+test('消したコンボと、変えたコンボは、変更点の一覧の取り消しで元に戻る', () => {
+  const state = variouslyEdited()
+  const before = comboList(loadSnapshot(state.baseline))
+  const undoOf = (id: string) => {
+    const change = listChanges(state).find((item) => item.id === id)
+    if (change?.undo.kind !== 'edit') throw new Error(`${id} の行がない`)
+    return change.undo.place
+  }
+  const restored = revertEdit(revertEdit(state, undoOf('combo-slot-0')), undoOf('combo-slot-1'))
+  expect(comboList(restored).slice(0, 2)).toEqual(before)
+  // 足したコンボは、残っている
+  expect(comboList(restored)).toHaveLength(3)
+})
+
+test('すべて取り消すと、編集も、出発点の入れ替えもなくなり、本体から読んだ内容に戻る', () => {
+  const state = replaceSource(variouslyEdited(), altered((snapshot) => (snapshot.keymap[5][5] = 0x04)))
+  const reverted = revertAll(state)
+  expect(reverted.baseline).toBe(state.baseline)
+  expect(reverted.source).toBe(state.baseline)
+  expect(hasUnwrittenChanges(reverted)).toBe(false)
+  expect(listChanges(reverted)).toEqual([])
+  // 変更がなければ、同じ状態を返す
+  expect(revertAll(reverted)).toBe(reverted)
+  const session = run([{ type: 'read', snapshot: cornixSnapshot() }, { type: 'editKey', layer: 0, key: 8, behavior: { tap: B } }])
+  expect(hasUnwrittenChanges(run([{ type: 'revertAll' }], session).edit!)).toBe(false)
+})
+
+test('目標と、本体の現在値から作った操作を、偽の機器に書くと、読み直した内容が目標と一致する', async () => {
+  const state = variouslyEdited()
+  const target = buildTarget(state)
+  const keyboard = createFakeCornix()
+  keyboard.snapshot = structuredClone(state.baseline)
+  const device = await keyboard.connect()
+  const operations = writeOperations(await device!.read(), target)
+  expect(operations.length).toBeGreaterThan(8)
+  await device!.write(operations)
+  expect(sameSnapshot(await device!.read(), target)).toBe(true)
+  // 書いた後は、送るものがない
+  expect(writeOperations(await device!.read(), target)).toEqual([])
 })

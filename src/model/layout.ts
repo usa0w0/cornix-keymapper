@@ -134,3 +134,11 @@ export function firmwareVersionOf(layout: LayoutDefinition): string | undefined 
   }
   return undefined
 }
+
+/** キーの場所の名前。編集欄、枠を使っているキーの一覧、変更点の一覧に出す */
+export const placeName = (layer: number, key: { row: number; col: number }) =>
+  `レイヤー ${layer} ・ 行 ${key.row} 列 ${key.col}`
+
+/** エンコーダーの1方向の名前 */
+export const encoderName = (turn: { encoder: number; direction: 'left' | 'right' }) =>
+  `エンコーダー ${turn.encoder + 1} の${turn.direction === 'left' ? '左回し' : '右回し'}`
