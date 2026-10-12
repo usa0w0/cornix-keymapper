@@ -1,11 +1,11 @@
 // キーの動作（4欄）を、本体の設定（キーコードと Tap Dance の枠）に直す。
 // 機能の自動判定と、Tap Dance の枠の割り当てを受け持つ（docs/design.md「機能の自動判定」「枠の割り当て」）。
-// 編集したキーにだけ行う。編集していないキーと枠は、出発点の値のまま残す
+// 編集したキーとエンコーダーにだけ行う。編集していないキー、エンコーダー、枠は、出発点の値のまま残す
 import type { KeyboardSnapshot, TapDanceEntry } from '../device/types.ts'
-import { isKeyCode, type Action } from './action.ts'
+import { canPlace, isKeyCode, type Action } from './action.ts'
 import { BEHAVIOR_SLOTS, type BehaviorSlot, type KeyBehavior } from './behavior.ts'
 import { LAYER_TAP, MOD_TAP, TAP_DANCE, tapDanceIndexOf } from './decode.ts'
-import type { Edits, KeyEdit } from './edits.ts'
+import type { EncoderEdit, Edits, KeyEdit } from './edits.ts'
 import { actionToKeycode, KC_TRANSPARENT, modsToBits } from './keycodes.ts'
 
 const KC_NO = 0x0000
@@ -90,6 +90,16 @@ export function encodeBehavior(behavior: KeyBehavior): EncodedKey | undefined {
   return { feature: 'tapDance', fields }
 }
 
+/**
+ * エンコーダーの1方向の動作を、キーコードに直す。動作1つが、キーコード1つになる。
+ * 「何もしない」と「透過」は入れられる（欄を消した時と、透過のスイッチ）。本体から読んだ、このサイトで扱わない動作は、元の値に戻る。
+ * 「押している間だけレイヤー N」（回す操作には「押している間」がない）と、キーコード1つで表せない動作は undefined
+ */
+export function encodeEncoderAction(action: Action): number | undefined {
+  const allowed = action.kind === 'none' || action.kind === 'transparent' || action.kind === 'unsupported'
+  return allowed || canPlace(action, 'encoder') ? actionToKeycode(action) : undefined
+}
+
 // ---- Tap Dance の枠の割り当て ----
 
 /** 枠の割り当てに使う、本体の設定の部分 */
@@ -144,10 +154,14 @@ export function tapDanceUses({ keymap, encoders, combos, tapDances }: KeySetting
   return [...uses.values()].sort((a, b) => a.slot - b.slot)
 }
 
-/** キーの編集を、出発点に当てはめた結果 */
+/** キーとエンコーダーの編集を、出発点に当てはめた結果 */
 export interface KeyEditPlan {
-  /** 編集を当てはめたキーマップと Tap Dance の枠。missing か invalid がある時は、書き込めない（残り枠数などの目安にだけ使う） */
+  /**
+   * 編集を当てはめたキーマップ、エンコーダー、Tap Dance の枠。
+   * missing、invalid、invalidEncoders がある時は、書き込めない（残り枠数などの目安にだけ使う）
+   */
   keymap: number[][]
+  encoders: [number, number][][]
   tapDances: TapDanceEntry[]
   /** 残り枠数（空いている枠の数） */
   free: number
@@ -157,6 +171,8 @@ export interface KeyEditPlan {
   unplaced: KeyEdit[]
   /** 本体の設定に直せない動作のキー、出発点にない場所のキー */
   invalid: KeyEdit[]
+  /** 本体の設定に直せない動作のエンコーダー、出発点にない場所のエンコーダー。エンコーダーでは、出発点のまま */
+  invalidEncoders: EncoderEdit[]
   /**
    * 上書きすれば使える枠（中身はあるが、どこからも使われていない枠）のうち、まだ使っていないものの数。
    * 上書きを認めていない時は、認めれば使える数
@@ -168,8 +184,10 @@ export interface KeyEditPlan {
 const PENDING = -1
 
 /**
- * キーの編集を出発点に当てはめ、Tap Dance の枠を割り当てる。
+ * キーとエンコーダーの編集を出発点に当てはめ、Tap Dance の枠を割り当てる。
  *
+ * - エンコーダーは、動作1つをキーコード1つに直すだけで、枠は使わない。ただし、Tap Dance を指していたエンコーダーを変えると、
+ *   その枠は使われなくなる（枠が使われているかは、編集した後のエンコーダーで見る）
  * - 出発点で中身が入っている枠は、どこからも指されていなくても、勝手に空にしない。出発点にある枠どうしは、まとめない
  * - 編集したキーが Tap Dance を必要とする時は、次の順で枠を決める。同じ内容のキーは、1つの枠を共有する
  *   1. 4欄が同じ内容の枠が出発点にあれば、その枠（複数あれば番号の小さいもの）
@@ -181,8 +199,18 @@ const PENDING = -1
  *
  * 結果は、編集の順番によらない（キーを、レイヤー、キーの番号の順に見る）
  */
-export function planKeyEdits(source: KeySettings, edits: Pick<Edits, 'keys' | 'overwriteUnusedTapDances'>): KeyEditPlan {
+export function planKeyEdits(
+  source: KeySettings,
+  edits: Pick<Edits, 'keys' | 'encoders' | 'overwriteUnusedTapDances'>,
+): KeyEditPlan {
   const keymap = source.keymap.map((keys) => [...keys])
+  const encoders = source.encoders.map((layer) => layer.map((turns): [number, number] => [...turns]))
+  const invalidEncoders: EncoderEdit[] = []
+  for (const edit of edits.encoders) {
+    const keycode = encoders[edit.layer]?.[edit.encoder] === undefined ? undefined : encodeEncoderAction(edit.action)
+    if (keycode === undefined) invalidEncoders.push(edit)
+    else encoders[edit.layer][edit.encoder][edit.direction === 'left' ? 0 : 1] = keycode
+  }
   const tapDances = source.tapDances.map((entry) => ({ ...entry }))
   const invalid: KeyEdit[] = []
   // 枠が要るキーを、枠の中身ごとにまとめる
@@ -215,7 +243,7 @@ export function planKeyEdits(source: KeySettings, edits: Pick<Edits, 'keys' | 'o
 
   // 2〜4. 残りは、空いている枠、この編集で使われなくなった枠、（認めていれば）使われていない枠の順に使う
   const pointedBefore = pointedSlots(source)
-  const pointedNow = pointedSlots({ ...source, keymap })
+  const pointedNow = pointedSlots({ ...source, keymap, encoders })
   const slots = source.tapDances.map((_, slot) => slot).slice(0, TAP_DANCE.count)
   const free = slots.filter((slot) => isEmptyEntry(source.tapDances[slot]) && !pointedBefore.has(slot))
   const released = slots.filter((slot) => pointedBefore.has(slot) && !pointedNow.has(slot))
@@ -247,11 +275,13 @@ export function planKeyEdits(source: KeySettings, edits: Pick<Edits, 'keys' | 'o
 
   return {
     keymap,
+    encoders,
     tapDances,
-    free: missing > 0 ? 0 : countFreeTapDances({ ...source, keymap, tapDances }),
+    free: missing > 0 ? 0 : countFreeTapDances({ ...source, keymap, encoders, tapDances }),
     missing,
     unplaced,
     invalid,
+    invalidEncoders,
     overwritable: unused.filter((slot) => !taken.has(slot)).length,
   }
 }
@@ -261,12 +291,12 @@ export function planKeyEdits(source: KeySettings, edits: Pick<Edits, 'keys' | 'o
  * 枠が足りない編集と、本体の設定に直せない編集は、状態に反映する前に止めているので、ここに来たら失敗にする
  */
 export function applyEdits(target: KeyboardSnapshot, edits: Edits): void {
-  if (edits.encoders.length > 0 || edits.combos.length > 0) {
-    throw new Error('エンコーダーとコンボの編集を本体の設定に直す処理は、まだない（#12、#13）')
-  }
+  if (edits.combos.length > 0) throw new Error('コンボの編集を本体の設定に直す処理は、まだない（#13）')
   const plan = planKeyEdits(target, edits)
   if (plan.invalid.length > 0) throw new Error('本体の設定に直せないキーの動作がある')
+  if (plan.invalidEncoders.length > 0) throw new Error('本体の設定に直せないエンコーダーの動作がある')
   if (plan.missing > 0) throw new Error(`Tap Dance の枠が ${plan.missing} 個足りない`)
   target.keymap = plan.keymap
+  target.encoders = plan.encoders
   target.tapDances = plan.tapDances
 }

@@ -172,15 +172,15 @@ export function sharedKeys(state: EditState, place: KeyPlace): KeyPlace[] {
   const plan = planKeys(state)
   const placed = (key: KeyPlace) => ![...plan.unplaced, ...plan.invalid].some((edit) => samePlace(edit, key))
   if (!placed(place)) return []
-  const uses = tapDanceUses({ ...state.source, keymap: plan.keymap, tapDances: plan.tapDances })
+  const uses = tapDanceUses({ ...state.source, keymap: plan.keymap, encoders: plan.encoders, tapDances: plan.tapDances })
   const keys = uses.find((use) => use.keys.some((key) => samePlace(key, place)))?.keys.filter(placed) ?? []
   return keys.length > 1 ? keys : []
 }
 
-/** キーの編集を出発点に当てはめた結果（キーコードと Tap Dance の枠の割り当て、残り枠数、足りない枠の数） */
+/** キーとエンコーダーの編集を出発点に当てはめた結果（キーコードと Tap Dance の枠の割り当て、残り枠数、足りない枠の数） */
 export const planKeys = (state: EditState): KeyEditPlan => planKeyEdits(state.source, state.edits)
 
-/** キーの編集を受け付けたか。止めた時は、その編集を当てはめた場合の結果（blocked）を返す。状態は変えていない */
+/** 編集を受け付けたか。止めた時は、その編集を当てはめた場合の結果（blocked）を返す。状態は変えていない */
 export interface KeyEditResult {
   state: EditState
   blocked: KeyEditPlan | null
@@ -196,7 +196,10 @@ function guard(state: EditState, next: EditState): KeyEditResult {
   if (next === state) return { state, blocked: null }
   const plan = planKeys(next)
   const before = planKeys(state)
-  const worse = plan.missing > before.missing || plan.invalid.length > before.invalid.length
+  const worse =
+    plan.missing > before.missing ||
+    plan.invalid.length > before.invalid.length ||
+    plan.invalidEncoders.length > before.invalidEncoders.length
   return worse ? { state, blocked: plan } : { state: next, blocked: null }
 }
 
@@ -218,7 +221,7 @@ export const tryEditKeysTogether = (
  */
 export const tryRevertEdit = (state: EditState, place: EditPlace) => guard(state, revertEdit(state, place))
 
-/** エンコーダーの1方向の動作を変える */
+/** エンコーダーの1方向の動作を変える。同じ場所の前の編集は置き換える。出発点と同じ内容なら、編集はなくなる */
 export function editEncoder(
   state: EditState,
   layer: number,
@@ -231,6 +234,18 @@ export function editEncoder(
   )
   return withEdits(state, { ...state.edits, encoders: [...others, { layer, encoder, direction, action }] })
 }
+
+/**
+ * エンコーダーの1方向の動作を変える。本体の設定に直せない動作（「押している間だけレイヤー N」など）は、状態に反映せずに止める。
+ * Tap Dance の枠が足りなくなる編集も止める（キーと同じ計算）
+ */
+export const tryEditEncoder = (
+  state: EditState,
+  layer: number,
+  encoder: number,
+  direction: 'left' | 'right',
+  action: Action,
+) => guard(state, editEncoder(state, layer, encoder, direction, action))
 
 /** コンボを足す。足した順の番号を付ける（枠の番号ではない） */
 export function addCombo(state: EditState, combo: ComboContent): EditState {
@@ -297,7 +312,7 @@ export function reapplyEdits(state: EditState, fresh: KeyboardSnapshot): EditSta
 /**
  * 編集を本体の表現に直して、目標（出発点の写し）に書き込む関数。
  * キーの動作からキーコードへの変換と Tap Dance の枠の割り当て、エンコーダー、コンボの枠の割り当てを受け持つ。
- * 中身は model/encode.ts にある（キーは作ってある。エンコーダーは #12、コンボは #13 で足す）
+ * 中身は model/encode.ts にある（キーとエンコーダーは作ってある。コンボは #13 で足す）
  */
 export type ApplyEdits = (target: KeyboardSnapshot, edits: Edits) => void
 
@@ -346,6 +361,7 @@ export type SessionAction =
   | { type: 'editKey'; layer: number; key: number; behavior: KeyBehavior; overwriteUnused?: boolean }
   /** 共有中のキーを、連動して同じ動作に変える。枠が足りなくなる編集は、反映しない（tryEditKeysTogether） */
   | { type: 'editKeysTogether'; keys: KeyPlace[]; behavior: KeyBehavior; overwriteUnused?: boolean }
+  /** エンコーダーの1方向の動作を変える。本体の設定に直せない動作は、反映しない（tryEditEncoder） */
   | { type: 'editEncoder'; layer: number; encoder: number; direction: 'left' | 'right'; action: Action }
   | { type: 'addCombo'; combo: ComboContent }
   | { type: 'editCombo'; ref: ComboRef; combo: ComboContent | null }
@@ -392,7 +408,7 @@ function applyToEdit(edit: EditState, action: Exclude<SessionAction, { type: 're
     case 'editKeysTogether':
       return tryEditKeysTogether(edit, action.keys, action.behavior, action.overwriteUnused).state
     case 'editEncoder':
-      return editEncoder(edit, action.layer, action.encoder, action.direction, action.action)
+      return tryEditEncoder(edit, action.layer, action.encoder, action.direction, action.action).state
     case 'addCombo':
       return addCombo(edit, action.combo)
     case 'editCombo':

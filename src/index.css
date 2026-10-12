@@ -838,6 +838,10 @@ main {
   gap: 0.6rem;
 }
 
+.keymap .fields-one {
+  grid-template-columns: minmax(0, 24rem);
+}
+
 .keymap .field-name {
   display: block;
   color: var(--muted);

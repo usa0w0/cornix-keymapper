@@ -4,8 +4,15 @@ import { cornixSnapshot } from '../device/fake/cornix.ts'
 import type { Action } from './action.ts'
 import type { KeyBehavior } from './behavior.ts'
 import { decodeKey, tapDanceIndexOf } from './decode.ts'
-import type { Edits, KeyEdit } from './edits.ts'
-import { applyEdits, countFreeTapDances, encodeBehavior, planKeyEdits, tapDanceUses } from './encode.ts'
+import type { EncoderEdit, Edits, KeyEdit } from './edits.ts'
+import {
+  applyEdits,
+  countFreeTapDances,
+  encodeBehavior,
+  encodeEncoderAction,
+  planKeyEdits,
+  tapDanceUses,
+} from './encode.ts'
 import { customKeycodesOf } from './keycodes.ts'
 
 const key = (code: number): Action => ({ kind: 'key', code, mods: [] })
@@ -415,7 +422,107 @@ test('本体の設定に直せない動作と、出発点にない場所の編�
   expect(() => applyEdits(structuredClone(source), edits(bad))).toThrow('直せない')
 })
 
-test('エンコーダーとコンボの編集は、まだ本体の設定に直せない', () => {
-  const withEncoder: Edits = { ...edits(), encoders: [{ layer: 0, encoder: 0, direction: 'left', action: A }] }
-  expect(() => applyEdits(cornixSnapshot(), withEncoder)).toThrow('まだない')
+test('コンボの編集は、まだ本体の設定に直せない', () => {
+  const withCombo: Edits = { ...edits(), combos: [{ ref: { added: 0 }, combo: { keys: [0x04, 0x05], output: A } }] }
+  expect(() => applyEdits(cornixSnapshot(), withCombo)).toThrow('まだない')
+})
+
+// ---- エンコーダー ----
+// 実機の設定では、エンコーダーは2つ。レイヤー 0 は、1つ目が [ホイール↑, ホイール↓]、2つ目が [ホイール↓, ホイール↑]。
+// レイヤー 1〜9 は、1つ目が [音量−, 音量＋]、2つ目が [ホイール↑, ホイール↓]
+
+const WHEEL_UP = 0x00d9
+const WHEEL_DOWN = 0x00da
+const VOLUME_DOWN = 0x00aa
+const VOLUME_UP = 0x00a9
+
+const turn = (layer: number, encoder: number, direction: 'left' | 'right', action: Action): EncoderEdit => ({
+  layer,
+  encoder,
+  direction,
+  action,
+})
+const turns = (...encoders: EncoderEdit[]): Edits => ({ keys: [], encoders, combos: [] })
+
+test('エンコーダーの動作は、キーコード1つになる。「押している間だけレイヤー N」と、キーコード1つで表せない動作は入れられない', () => {
+  expect(encodeEncoderAction(key(VOLUME_UP))).toBe(VOLUME_UP)
+  expect(encodeEncoderAction(CTRL_C)).toBe(0x0106)
+  expect(encodeEncoderAction(L_CTRL)).toBe(0x00e0)
+  expect(encodeEncoderAction({ kind: 'layer', mode: 'toggle', layer: 3 })).toBe(0x5263)
+  // 欄を消した時の「何もしない」と、透過
+  expect(encodeEncoderAction({ kind: 'none' })).toBe(0x0000)
+  expect(encodeEncoderAction({ kind: 'transparent' })).toBe(0x0001)
+  // 本体から読んだ、このサイトで扱わない動作は、元の値に戻る
+  expect(encodeEncoderAction({ kind: 'unsupported', raw: TD + 3, label: 'Tap Dance 3' })).toBe(TD + 3)
+  expect(encodeEncoderAction(mo(1))).toBeUndefined()
+  expect(encodeEncoderAction({ kind: 'key', code: 0x04, mods: [{ kind: 'ctrl', side: 'left' }, { kind: 'shift', side: 'right' }] })).toBeUndefined()
+})
+
+test('実機の設定: エンコーダーの編集は、その方向だけを変える。ほかの方向・レイヤー・キー・枠は、出発点のまま', () => {
+  const source = cornixSnapshot()
+  expect(source.encoders[0]).toEqual([[WHEEL_UP, WHEEL_DOWN], [WHEEL_DOWN, WHEEL_UP]])
+  expect(source.encoders[1]).toEqual([[VOLUME_DOWN, VOLUME_UP], [WHEEL_UP, WHEEL_DOWN]])
+  const target = structuredClone(source)
+  applyEdits(target, turns(turn(0, 0, 'left', key(VOLUME_DOWN)), turn(1, 1, 'right', { kind: 'none' })))
+  expect(target.encoders[0]).toEqual([[VOLUME_DOWN, WHEEL_DOWN], [WHEEL_DOWN, WHEEL_UP]])
+  expect(target.encoders[1]).toEqual([[VOLUME_DOWN, VOLUME_UP], [WHEEL_UP, 0]])
+  expect(target.encoders.slice(2)).toEqual(source.encoders.slice(2))
+  expect({ ...target, encoders: source.encoders }).toEqual(source)
+  // 出発点は書き換えない
+  expect(source).toEqual(cornixSnapshot())
+})
+
+test('エンコーダーとキーの編集は、一緒に目標に入る', () => {
+  const target = cornixSnapshot()
+  applyEdits(target, { keys: [edit(0, 1, A_ESC)], encoders: [turn(2, 0, 'right', CTRL_C)], combos: [] })
+  expect(target.keymap[0][1]).toBe(TD + 2)
+  expect(target.tapDances[2]).toEqual(A_ESC_ENTRY)
+  expect(target.encoders[2][0]).toEqual([VOLUME_DOWN, 0x0106])
+})
+
+test('Tap Dance を指していたエンコーダーを変えると、その枠は使われなくなり、空になる', () => {
+  // 枠 2 は、エンコーダーだけが指している
+  const source = altered((s) => {
+    s.tapDances[2] = { ...A_ESC_ENTRY }
+    s.encoders[4][1] = [TD + 2, WHEEL_DOWN]
+  })
+  expect(countFreeTapDances(source)).toBe(29)
+  const plan = planKeyEdits(source, turns(turn(4, 1, 'left', key(WHEEL_UP))))
+  expect(plan.encoders[4][1]).toEqual([WHEEL_UP, WHEEL_DOWN])
+  expect(plan.tapDances[2]).toEqual(EMPTY)
+  expect(plan.free).toBe(30)
+  // 同じ枠を、ほかのエンコーダーかキーも指していれば、残る
+  const shared = altered((s) => {
+    s.tapDances[2] = { ...A_ESC_ENTRY }
+    s.encoders[4][1] = [TD + 2, TD + 2]
+  })
+  const kept = planKeyEdits(shared, turns(turn(4, 1, 'left', key(WHEEL_UP))))
+  expect(kept.tapDances[2]).toEqual(A_ESC_ENTRY)
+  expect(kept.free).toBe(29)
+  // エンコーダーを変えていなければ、キーが使わなくなっても、枠は残る
+  const pointed = altered((s) => (s.encoders[4][1] = [TD + 1, WHEEL_DOWN]))
+  expect(planKeyEdits(pointed, edits(edit(0, 54, { tap: B }))).tapDances[1]).toEqual(source.tapDances[1])
+})
+
+test('エンコーダーの編集で使われなくなった枠は、枠が要るキーの編集に使える', () => {
+  // 空いている枠がなく、枠 31 はエンコーダーだけが指している
+  const source = full((s) => {
+    s.keymap[9][31] = 0
+    s.encoders[4][1] = [TD + 31, WHEEL_DOWN]
+  })
+  expect(planKeyEdits(source, edits(edit(0, 1, A_ESC))).missing).toBe(1)
+  const plan = planKeyEdits(source, { ...edits(edit(0, 1, A_ESC)), encoders: [turn(4, 1, 'left', key(WHEEL_UP))] })
+  expect(plan.missing).toBe(0)
+  expect(plan.keymap[0][1]).toBe(TD + 31)
+  expect(plan.tapDances[31]).toEqual(A_ESC_ENTRY)
+})
+
+test('本体の設定に直せないエンコーダーの動作と、出発点にない場所の編集は、invalidEncoders として返し、目標は作れない', () => {
+  const source = cornixSnapshot()
+  const held = turn(0, 0, 'left', mo(1))
+  const nowhere = turn(0, 5, 'left', A)
+  const plan = planKeyEdits(source, turns(held, nowhere))
+  expect(plan.invalidEncoders).toEqual([held, nowhere])
+  expect(plan.encoders).toEqual(source.encoders)
+  expect(() => applyEdits(structuredClone(source), turns(held))).toThrow('直せない')
 })

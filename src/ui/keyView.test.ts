@@ -228,10 +228,27 @@ test('編集したキーは、編集した後の内容を出す。編集して�
   expect(isChanged(edits, 0, key(2))).toBe(false)
   expect(keyViewOf(cornix, 1, key(1), 'us', undefined, edits)).toEqual(keyViewOf(cornix, 1, key(1), 'us'))
   expect(isChanged(edits, 1, key(1))).toBe(false)
-  // エンコーダーは、まだ編集できない
   expect(isChanged(edits, 0, { kind: 'encoder', encoder: 0, direction: 'left' })).toBe(false)
   expect(behaviorAt(cornix, 0, key(1), undefined, edits)).toEqual({ tap: A, hold: CTRL })
   expect(behaviorAt(cornix, 0, key(999), undefined, edits)).toBeUndefined()
+})
+
+test('実機の設定: 編集したエンコーダーは、その方向・そのレイヤーだけ、編集した後の内容を出す', () => {
+  const left = { kind: 'encoder', encoder: 0, direction: 'left' } as const
+  const right = { kind: 'encoder', encoder: 0, direction: 'right' } as const
+  const VOLUME_UP: Action = { kind: 'key', code: 0xa9, mods: [] }
+  const edits: Edits = { keys: [], encoders: [{ layer: 0, ...left, action: VOLUME_UP }], combos: [] }
+  expect(keyViewOf(cornix, 0, left, 'us', undefined, edits).slots.tap?.short).toBe('音量＋')
+  expect(behaviorAt(cornix, 0, left, undefined, edits)).toEqual({ tap: VOLUME_UP })
+  expect(isChanged(edits, 0, left)).toBe(true)
+  expect(keyViewOf(cornix, 0, right, 'us', undefined, edits).slots.tap?.short).toBe('ホイール↓')
+  expect(isChanged(edits, 0, right)).toBe(false)
+  expect(keyViewOf(cornix, 1, left, 'us', undefined, edits).slots.tap?.short).toBe('音量−')
+  expect(isChanged(edits, 1, left)).toBe(false)
+  expect(isChanged(edits, 0, { kind: 'encoder', encoder: 1, direction: 'left' })).toBe(false)
+  // 欄を消したエンコーダーは、何もしない
+  const cleared: Edits = { keys: [], encoders: [{ layer: 0, ...left, action: { kind: 'none' } }], combos: [] }
+  expect(keyViewOf(cornix, 0, left, 'us', undefined, cleared)).toEqual({ state: 'none', slots: { tap: { short: '', full: '何もしない' } } })
 })
 
 test('透過キーは、編集を当てはめた後の、下のレイヤーの動作を出す', () => {

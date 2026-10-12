@@ -4,7 +4,7 @@ import type { KeyboardSnapshot } from '../device/types.ts'
 import { cornixSnapshot } from '../device/fake/cornix.ts'
 import { LAYER_MODES, type Action } from '../model/action.ts'
 import type { KeyBehavior } from '../model/behavior.ts'
-import { editKey, loadSnapshot, tryEditKey, type EditState } from '../session/editState.ts'
+import { countEdits, editEncoder, editKey, loadSnapshot, tryEditKey, type EditState } from '../session/editState.ts'
 import { AppHeader } from './AppHeader.tsx'
 import { editSlotCounts } from './deviceInfo.ts'
 import { KeyEditor } from './KeyEditor.tsx'
@@ -105,6 +105,69 @@ test('編集欄: 編集不可のキーは、その旨と元の内容を出す。
   expect(html).not.toContain('field-clear')
   expect(html).not.toContain('role="switch"')
   expect(html).toContain('「タップ」に入れる動作')
+})
+
+const turnEditor = (action: Action, changed = false) =>
+  renderToStaticMarkup(
+    <KeyEditor
+      layer={1}
+      place={{ encoder: 0, direction: 'left' }}
+      behavior={{ tap: action }}
+      view={behaviorView({ tap: action }, 'us')}
+      changed={changed}
+      legend="us"
+      layerCount={10}
+      layerModes={LAYER_MODES}
+      onChange={() => {}}
+      onRevert={() => {}}
+    />,
+  )
+
+test('編集欄: エンコーダーは、欄が1つ（回した時）。動作を選ぶ部品には、エンコーダーに入れられる動作だけを出す', () => {
+  const html = turnEditor({ kind: 'key', code: 0xaa, mods: [] }, true)
+  expect(html).toContain('<h2>レイヤー 1 ・ エンコーダー 1 の左回し</h2>')
+  expect(html).toContain('<div class="fields fields-one">')
+  expect(count(html, 'class="field-name"')).toBe(1)
+  expect(html).toContain('<span class="field-name">回した時</span>')
+  expect(html).toContain('aria-label="回した時: 音量を下げる">音量を下げる</button><button type="button" class="field-clear" aria-label="回した時を消す"')
+  expect(html).toContain('「回した時」に入れる動作')
+  expect(html).toContain('変更を取り消す</button>')
+  for (const name of ['タップ', '長押し', '2回タップ', 'タップ後長押し']) expect(html).not.toContain(`>${name}<`)
+  // 「押している間だけレイヤー N」は、エンコーダーには入れられない
+  expect(html).not.toContain('押している間だけ')
+})
+
+test('編集欄: 欄が空のエンコーダーは、回しても何も起きない旨と、「透過」のスイッチを出す', () => {
+  const html = turnEditor({ kind: 'none' })
+  expect(count(html, '（なし）</button>')).toBe(1)
+  expect(html).not.toContain('field-clear')
+  expect(html).toContain('role="switch" class="switch" aria-checked="false"')
+  expect(html).toContain('欄が空なので、この向きに回しても何も起きません。')
+})
+
+test('編集欄: 本体から読んだエンコーダーが Tap Dance などを指している時は、編集不可として出す。動作を選んで上書きはできる', () => {
+  const html = turnEditor({ kind: 'unsupported', raw: 0x5703, label: 'Tap Dance 3' })
+  expect(html).toContain('<span class="key state-locked">')
+  expect(html).toContain('このエンコーダーの動作は、このサイトでは編集できません。')
+  expect(html).toContain('別の動作で上書きすることはできます')
+  expect(html).toContain('aria-label="回した時: Tap Dance 3">Tap Dance 3</button>')
+  expect(html).not.toContain('field-clear')
+  expect(html).toContain('「回した時」に入れる動作')
+})
+
+test('キーボード図: 編集したエンコーダーに、編集した後の内容と変更ありの印を出す。件数にも数える', () => {
+  const loaded = loadSnapshot(cornixSnapshot())
+  const state = editEncoder(editEncoder(loaded, 0, 0, 'left', { kind: 'key', code: 0xa9, mods: [] }), 0, 1, 'right', { kind: 'none' })
+  const html = renderToStaticMarkup(<KeymapView state={state} onAction={() => {}} />)
+  const figure = html.slice(html.indexOf('class="figure"'), html.indexOf('class="edit"'))
+  expect(figure).toContain('<button type="button" class="key state-normal encoder encoder-left changed"')
+  expect(figure).toContain('aria-label="エンコーダー 1 の左回し: 音量を上げる（変更あり）"')
+  expect(figure).toContain('<button type="button" class="key state-none encoder encoder-right changed"')
+  expect(figure).toContain('aria-label="エンコーダー 2 の右回し: 何もしない（変更あり）"')
+  expect(count(figure, 'mark-changed')).toBe(2)
+  // 変えていない方向は、そのまま
+  expect(figure).toContain('aria-label="エンコーダー 1 の右回し: マウスのホイールを下へ"')
+  expect(countEdits(state)).toBe(2)
 })
 
 test('キーボード図: 編集したキーに、編集した後の内容と変更ありの印を出す', () => {
