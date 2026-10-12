@@ -29,6 +29,7 @@ import {
   type KeyPlace,
 } from '../model/edits.ts'
 import { customKeycodesOf, KC_TRANSPARENT, keycodeToAction, type CustomKeycode } from '../model/keycodes.ts'
+import { sameSnapshot, sameValue } from '../model/snapshot.ts'
 
 export interface EditState {
   /** 基準: 本体から読んだもの。変更点の一覧を作る相手 */
@@ -39,18 +40,7 @@ export interface EditState {
   edits: Edits
 }
 
-/** 中身が同じか。値のない項目（undefined）は、ない項目と同じに扱う */
-function sameValue(a: unknown, b: unknown): boolean {
-  if (a === b) return true
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
-  if (Array.isArray(a) !== Array.isArray(b)) return false
-  const [left, right] = [a as Record<string, unknown>, b as Record<string, unknown>]
-  const keys = new Set([...Object.keys(left), ...Object.keys(right)])
-  return [...keys].every((key) => sameValue(left[key], right[key]))
-}
-
-/** 2つのスナップショットが、機器の識別・レイアウト定義・枠数も含めて、すべて同じか */
-export const sameSnapshot = (a: KeyboardSnapshot, b: KeyboardSnapshot) => sameValue(a, b)
+export { sameSnapshot }
 
 /** 読み出した内容から始める。基準と出発点は同じもので、編集はない */
 export const loadSnapshot = (snapshot: KeyboardSnapshot): EditState => ({
