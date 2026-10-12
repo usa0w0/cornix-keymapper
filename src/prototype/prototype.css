@@ -8,6 +8,7 @@
   --accent-soft: #e4edff;
   --ok: #1b6e2d;
   --changed: #d97706;
+  --danger: #b3261e;
   --combo: #0f8a7e;
   --combo-soft: #dff5f2;
   --key: #ffffff;
@@ -30,6 +31,7 @@
     --accent-soft: #23314f;
     --ok: #5fd07a;
     --changed: #f5a524;
+    --danger: #ff8a80;
     --combo: #35b8aa;
     --combo-soft: #17403c;
     --key: #2a2e34;
@@ -790,4 +792,99 @@
 
 .proto .combo-missing {
   flex-basis: 100%;
+}
+
+.proto .write-dialog {
+  width: min(52rem, 92vw);
+  padding: 1.2rem 1.4rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.25);
+}
+
+.proto .write-dialog::backdrop {
+  background: rgb(0 0 0 / 0.35);
+}
+
+.proto .write-dialog h2 {
+  margin: 0 0 0.8rem;
+  font-size: 1.05rem;
+}
+
+.proto .write-dialog h2.ok {
+  color: var(--ok);
+}
+
+.proto .write-dialog h2.ng,
+.proto .write-warning {
+  color: var(--danger);
+}
+
+.proto .write-dialog progress {
+  width: 100%;
+  height: 0.9rem;
+  accent-color: var(--accent);
+}
+
+.proto .changes {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.proto .changes th,
+.proto .changes td {
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.proto .changes thead th {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: normal;
+}
+
+.proto .changes tbody th {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.proto .changes td:nth-child(2) {
+  color: var(--muted);
+}
+
+.proto .changes-arrow {
+  color: var(--muted);
+}
+
+.proto .changes td:last-child {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.proto .write-note {
+  margin: 0.9rem 0 0;
+  color: var(--muted);
+}
+
+.proto .write-sample {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.proto .write-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 1.1rem;
 }

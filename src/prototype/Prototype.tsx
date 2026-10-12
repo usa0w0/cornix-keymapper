@@ -1,5 +1,5 @@
 // 画面デザインの試作（#22）。偽の機器のデータを表示し、編集は画面の中だけで行う（書き込みはしない）
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardSnapshot } from '../device/types.ts'
 import { bounds, placeKeys, type PlacedKey } from './kle.ts'
 import {
@@ -38,6 +38,17 @@ interface Combo {
   id: number
   keys: Behavior[]
   output?: number
+  /** 本体に書き込み済みか */
+  saved?: boolean
+}
+
+/** 変更点の一覧の1行 */
+interface Change {
+  id: string
+  where: string
+  before: string
+  after: string
+  undo: () => void
 }
 
 /** 2つのキーの中身が同じかを比べるための文字列 */
@@ -72,19 +83,62 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
   )
   // 画面の中だけの編集。キーごとに、編集後の動作を持つ
   const [edits, setEdits] = useState<Record<string, Behavior>>({})
+  // 書き込みが済んだ編集。本体の中身の代わりに持つ（試作では、本体には書かない）
+  const [written, setWritten] = useState<Record<string, Behavior>>({})
+  const [writing, setWriting] = useState(false)
   const [combos, setCombos] = useState<Combo[]>([])
   // 追加中、または変更中のコンボ
   const [draft, setDraft] = useState<Combo | null>(null)
   const usedTapDances = snapshot.tapDances.filter((t) => t.onTap || t.onHold || t.onDoubleTap || t.onTapHold).length
   const usedCombos = snapshot.combos.filter((c) => c.output !== 0).length + combos.length
-  const changes = Object.keys(edits).length + combos.length
+  const unsavedCombos = combos.filter((combo) => !combo.saved)
+  const changes = Object.keys(edits).length + unsavedCombos.length
 
-  const behaviorAt = (at: number, target: Selection): Behavior =>
-    edits[editKey(at, target)] ??
+  const baseAt = (at: number, target: Selection): Behavior =>
+    written[editKey(at, target)] ??
     behaviorOf(
       target.kind === 'key' ? snapshot.keymap[at][target.index] : snapshot.encoders[at][target.encoder][target.direction],
       snapshot,
     )
+  const behaviorAt = (at: number, target: Selection): Behavior => edits[editKey(at, target)] ?? baseAt(at, target)
+  const describe = (behavior: Behavior) => {
+    if (behavior.state === 'transparent') return '透過'
+    const view = viewBehavior(behavior, snapshot, legend)
+    const parts = SLOTS.filter((slot) => view.slots[slot]).map((slot) => `${SLOT_NAMES[slot]}: ${view.slots[slot]!.full}`)
+    return parts.length > 0 ? parts.join(' ／ ') : '空（何もしない）'
+  }
+  const changeList: Change[] = [
+    ...Object.entries(edits).map(([id, behavior]): Change => {
+      const [at, rest] = id.split(':')
+      const target: Selection =
+        rest[0] === 'k'
+          ? { kind: 'key', index: Number(rest.slice(1)) }
+          : { kind: 'encoder', encoder: Number(rest.slice(1).split('-')[0]), direction: Number(rest.split('-')[1]) }
+      const where =
+        target.kind === 'key'
+          ? `レイヤー ${at} ・ 行 ${Math.floor(target.index / snapshot.layout.cols)} 列 ${target.index % snapshot.layout.cols}`
+          : `レイヤー ${at} ・ エンコーダー ${target.encoder + 1} の${target.direction === 0 ? '左回し' : '右回し'}`
+      return {
+        id,
+        where,
+        before: describe(baseAt(Number(at), target)),
+        after: describe(behavior),
+        undo: () =>
+          setEdits((current) => {
+            const next = { ...current }
+            delete next[id]
+            return next
+          }),
+      }
+    }),
+    ...unsavedCombos.map((combo): Change => ({
+      id: `combo${combo.id}`,
+      where: 'コンボ',
+      before: '（なし）',
+      after: `${combo.keys.map((key) => describe(key)).join(' と ')} を同時に押す → ${combo.output === undefined ? '' : labelOf(combo.output, snapshot, legend).full}`,
+      undo: () => setCombos((current) => current.filter((c) => c.id !== combo.id)),
+    })),
+  ]
   const viewAt = (at: number, target: Selection): KeyView => {
     const view = viewBehavior(behaviorAt(at, target), snapshot, legend)
     if (view.state !== 'transparent' || target.kind !== 'key') return view
@@ -113,7 +167,7 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
         </span>
         <button type="button">.vil に保存</button>
         <button type="button">.vil を読み込む</button>
-        <button type="button" className="primary" disabled={changes === 0}>
+        <button type="button" className="primary" disabled={changes === 0} onClick={() => setWriting(true)}>
           書き込み（変更 {changes} 件）
         </button>
       </header>
@@ -200,6 +254,17 @@ export function Prototype({ snapshot }: { snapshot: KeyboardSnapshot }) {
         </>
       )}
       <Legend />
+      {writing && (
+        <WriteDialog
+          changes={changeList}
+          onWritten={() => {
+            setWritten((current) => ({ ...current, ...edits }))
+            setEdits({})
+            setCombos((current) => current.map((combo) => ({ ...combo, saved: true })))
+          }}
+          onClose={() => setWriting(false)}
+        />
+      )}
     </div>
   )
 }
@@ -263,6 +328,176 @@ function KeyboardFigure(props: {
         })}
       </div>
     </div>
+  )
+}
+
+type WritePhase = 'confirm' | 'writing' | 'done' | 'failed' | 'mismatch' | 'restored'
+type WriteOutcome = 'done' | 'failed' | 'mismatch'
+
+/** 書き込みの流れ。変更点の確認 → 書き込み中 → 結果。試作では本体に書かず、結果は見本として選ぶ */
+function WriteDialog({ changes, onWritten, onClose }: { changes: Change[]; onWritten: () => void; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null)
+  const [phase, setPhase] = useState<WritePhase>('confirm')
+  const [outcome, setOutcome] = useState<WriteOutcome>('done')
+  const [progress, setProgress] = useState(0)
+  // 書き込みを始めた時の件数。書き込み済みにすると一覧が空になるので、控えておく
+  const [total, setTotal] = useState(changes.length)
+  const stopAt = outcome === 'failed' ? Math.max(1, Math.ceil(total / 2)) : total
+
+  useEffect(() => {
+    if (!ref.current?.open) ref.current?.showModal()
+  }, [])
+  useEffect(() => {
+    if (phase !== 'writing') return
+    const timer = setTimeout(() => {
+      if (progress < stopAt) {
+        setProgress(progress + 1)
+        return
+      }
+      if (outcome === 'done') onWritten()
+      setPhase(outcome)
+    }, 450)
+    return () => clearTimeout(timer)
+  }, [phase, progress, stopAt, outcome, onWritten])
+
+  const start = () => {
+    setTotal(changes.length)
+    setProgress(0)
+    setPhase('writing')
+  }
+  const busy = phase === 'writing'
+
+  return (
+    <dialog
+      ref={ref}
+      className="write-dialog"
+      onClose={onClose}
+      onCancel={(event) => {
+        // 書き込みの途中は、Esc で閉じさせない
+        if (busy) event.preventDefault()
+      }}
+    >
+      {phase === 'confirm' && (
+        <>
+          <h2>変更点の確認（{changes.length} 件）</h2>
+          {changes.length === 0 ? (
+            <p className="edit-empty">変更はありません。</p>
+          ) : (
+            <table className="changes">
+              <thead>
+                <tr>
+                  <th>場所</th>
+                  <th>いま</th>
+                  <th />
+                  <th>書き込む内容</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {changes.map((change) => (
+                  <tr key={change.id}>
+                    <th>{change.where}</th>
+                    <td>{change.before}</td>
+                    <td className="changes-arrow">→</td>
+                    <td>{change.after}</td>
+                    <td>
+                      <button type="button" onClick={change.undo}>
+                        取り消す
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <p className="write-note">書き込む前に、いまの本体の設定を自動でバックアップします。</p>
+          <label className="write-sample">
+            試作用: 書き込みの結果を選ぶ
+            <select value={outcome} onChange={(event) => setOutcome(event.target.value as WriteOutcome)}>
+              <option value="done">うまくいく</option>
+              <option value="failed">途中で失敗する</option>
+              <option value="mismatch">読み直すと内容が違う</option>
+            </select>
+          </label>
+          <div className="write-actions">
+            <button type="button" onClick={() => ref.current?.close()}>
+              やめる
+            </button>
+            <button type="button" className="primary" disabled={changes.length === 0} onClick={start}>
+              本体に書き込む
+            </button>
+          </div>
+        </>
+      )}
+      {phase === 'writing' && (
+        <>
+          <h2>書き込み中…</h2>
+          <progress value={progress} max={total} />
+          <p>
+            {total} 件中 {progress} 件を書きました。
+          </p>
+          <p className="write-warning">終わるまで、キーボードの電源を切ったり、接続を外したりしないでください。</p>
+        </>
+      )}
+      {phase === 'done' && (
+        <>
+          <h2 className="ok">書き込みました</h2>
+          <p>{total} 件を書き込み、本体から読み直して、内容が合っていることを確かめました。</p>
+          <div className="write-actions">
+            <button type="button" className="primary" onClick={() => ref.current?.close()}>
+              閉じる
+            </button>
+          </div>
+        </>
+      )}
+      {(phase === 'failed' || phase === 'mismatch') && (
+        <>
+          <h2 className="ng">{phase === 'failed' ? '書き込みの途中で失敗しました' : '書き込んだ内容が、本体と合いません'}</h2>
+          {phase === 'failed' ? (
+            <>
+              <p>
+                {total} 件中 {progress} 件を書いた所で、キーボードから応答がなくなりました。失敗したのは「
+                {changes[Math.min(progress, changes.length - 1)]?.where}」です。
+              </p>
+              <p>本体は、書きかけの状態です。電源と接続を確かめてから、どちらかを選んでください。</p>
+            </>
+          ) : (
+            <>
+              <p>
+                {total} 件を書きましたが、本体から読み直すと「{changes[0]?.where}」の内容が、書き込んだものと違っていました。
+              </p>
+              <p>もう一度書き込むか、書き込み前の状態に戻してください。</p>
+            </>
+          )}
+          <div className="write-actions">
+            <button type="button" onClick={() => setPhase('restored')}>
+              書き込み前の状態に戻す
+            </button>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                setOutcome('done')
+                start()
+              }}
+            >
+              再試行
+            </button>
+          </div>
+        </>
+      )}
+      {phase === 'restored' && (
+        <>
+          <h2>書き込み前の状態に戻しました</h2>
+          <p>本体は、書き込む前の設定に戻っています。画面の編集内容は残っているので、もう一度書き込めます。</p>
+          <div className="write-actions">
+            <button type="button" className="primary" onClick={() => ref.current?.close()}>
+              閉じる
+            </button>
+          </div>
+        </>
+      )}
+    </dialog>
   )
 }
 
