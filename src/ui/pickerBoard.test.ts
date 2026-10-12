@@ -11,7 +11,10 @@ import {
   cellWidth,
   isCurrent,
   layerChoices,
-  layerStartId,
+  pickerStartId,
+  startCategory,
+  startLayerMode,
+  startTogether,
   type BoardCell,
 } from './pickerBoard.ts'
 
@@ -136,13 +139,75 @@ test('存在しないレイヤーと、使えない方式は、選択肢に出�
   expect(layerChoices(context('tap', { layerCount: 0 }))).toEqual({ modes: [], layers: [] })
 })
 
-test('切り替え方の選択は、欄か、いま入っている切り替え方が変わった時にだけ始め直す', () => {
-  const toggle1: Action = { kind: 'layer', mode: 'toggle', layer: 1 }
-  // 欄が変わった時と、切り替え方の違う動作が入った時
-  expect(layerStartId('tap', toggle1)).not.toBe(layerStartId('doubleTap', toggle1))
-  expect(layerStartId('tap', toggle1)).not.toBe(layerStartId('tap', { kind: 'layer', mode: 'oneShot', layer: 1 }))
-  expect(layerStartId('tap', toggle1)).not.toBe(layerStartId('tap', undefined))
-  // 切り替え先だけが変わった時と、レイヤー切り替えでない動作どうしでは、選びかけの切り替え方を保つ
-  expect(layerStartId('tap', toggle1)).toBe(layerStartId('tap', { ...toggle1, layer: 2 }))
-  expect(layerStartId('tap', undefined)).toBe(layerStartId('tap', { kind: 'key', code: 0x04, mods: [] }))
+const ctrl = { kind: 'ctrl', side: 'left' } as const
+const shift = { kind: 'shift', side: 'left' } as const
+const toggle1: Action = { kind: 'layer', mode: 'toggle', layer: 1 }
+
+test('最初に開く分類は、いま入っている動作の分類にする', () => {
+  expect(startCategory(undefined, context('tap'))).toBe('keyboard')
+  expect(startCategory({ kind: 'key', code: 0x04, mods: [] }, context('tap'))).toBe('keyboard')
+  expect(startCategory(toggle1, context('tap'))).toBe('layer')
+  expect(startCategory({ kind: 'layer', mode: 'momentary', layer: 2 }, context('hold'))).toBe('layer')
+  // 音量、マウス、テンキーは「メディア・その他」
+  for (const code of [0xa9, 0xd9, 0x59]) expect(startCategory({ kind: 'key', code, mods: [] }, context('tap'))).toBe('other')
+  // ショートカット、Shift で出る記号、修飾キーだけの動作は「キーボード」
+  expect(startCategory({ kind: 'key', code: 0x06, mods: [ctrl] }, context('tap'))).toBe('keyboard')
+  expect(startCategory({ kind: 'key', code: 0x1e, mods: [shift] }, context('tap'))).toBe('keyboard')
+  expect(startCategory({ kind: 'key', mods: [ctrl, shift] }, context('hold'))).toBe('keyboard')
+  // 修飾キーを付けたメディアのキーは、キーの分類にする
+  expect(startCategory({ kind: 'key', code: 0xa9, mods: [ctrl] }, context('tap'))).toBe('other')
+  // 選択肢にない動作（透過、何もしない、編集不可、選択肢に出さないキー）は「キーボード」
+  expect(startCategory({ kind: 'transparent' }, context('tap'))).toBe('keyboard')
+  expect(startCategory({ kind: 'none' }, context('tap'))).toBe('keyboard')
+  expect(startCategory({ kind: 'unsupported', raw: 0x7e00, label: 'BT0' }, context('tap'))).toBe('keyboard')
+  expect(startCategory({ kind: 'key', code: 0xb2, mods: [] }, context('tap'))).toBe('keyboard')
+})
+
+test('「一緒に押す修飾キー」は、いま入っているショートカットや記号の修飾キーから始める', () => {
+  expect(startTogether(undefined)).toEqual([])
+  expect(startTogether({ kind: 'key', code: 0x04, mods: [] })).toEqual([])
+  expect(startTogether({ kind: 'key', code: 0x06, mods: [ctrl] })).toEqual(['ctrl'])
+  expect(startTogether({ kind: 'key', code: 0x1e, mods: [shift] })).toEqual(['shift'])
+  // 並び順は、Ctrl、Shift、Alt、GUI の順にそろえる
+  expect(startTogether({ kind: 'key', code: 0x2b, mods: [{ kind: 'gui', side: 'left' }, shift, ctrl] })).toEqual(['ctrl', 'shift', 'gui'])
+  // 修飾キーだけの動作は、図の修飾キーそのものが選択中に見えるので、何も選ばない
+  expect(startTogether({ kind: 'key', mods: [ctrl, shift] })).toEqual([])
+  // 右側の修飾キーの組は図から作れないので、何も選ばない
+  expect(startTogether({ kind: 'key', code: 0x06, mods: [{ kind: 'ctrl', side: 'right' }] })).toEqual([])
+  expect(startTogether(toggle1)).toEqual([])
+})
+
+test('復元した修飾キーで図を出すと、いま入っている動作のキーが、同じ動作として当たる', () => {
+  const currents: Action[] = [
+    { kind: 'key', code: 0x06, mods: [ctrl] },
+    { kind: 'key', code: 0x1e, mods: [shift] },
+    { kind: 'key', code: 0x2b, mods: [{ kind: 'gui', side: 'left' }, shift, ctrl] },
+    { kind: 'key', code: 0x04, mods: [] },
+    { kind: 'key', mods: [{ kind: 'alt', side: 'right' }] },
+  ]
+  for (const current of currents) {
+    const hits = pressable.filter((cell) => isCurrent(current, boardAction(cell, startTogether(current))))
+    expect(hits).toHaveLength(1)
+  }
+})
+
+test('切り替え方は、いま入っている切り替え方から始め、この欄で選べない時は最初のものにする', () => {
+  const tapModes = layerChoices(context('tap')).modes
+  expect(startLayerMode({ kind: 'layer', mode: 'oneShot', layer: 1 }, tapModes)).toBe('oneShot')
+  expect(startLayerMode(undefined, tapModes)).toBe('toggle')
+  expect(startLayerMode({ kind: 'key', code: 0x04, mods: [] }, tapModes)).toBe('toggle')
+  expect(startLayerMode({ kind: 'layer', mode: 'oneShot', layer: 1 }, layerChoices(context('hold')).modes)).toBe('momentary')
+  expect(startLayerMode(toggle1, [])).toBeUndefined()
+})
+
+test('利用者が切り替えた分類や修飾キーは、欄か、いま入っている動作が変わった時に捨てる', () => {
+  const copy: Action = { kind: 'key', code: 0x06, mods: [ctrl] }
+  expect(pickerStartId('tap', copy)).not.toBe(pickerStartId('doubleTap', copy))
+  expect(pickerStartId('tap', copy)).not.toBe(pickerStartId('tap', { ...copy, code: 0x19 }))
+  expect(pickerStartId('tap', copy)).not.toBe(pickerStartId('tap', { ...copy, mods: [] }))
+  expect(pickerStartId('tap', toggle1)).not.toBe(pickerStartId('tap', { ...toggle1, layer: 2 }))
+  expect(pickerStartId('tap', copy)).not.toBe(pickerStartId('tap', undefined))
+  // 同じ欄の同じ動作なら、作り直した値でも変わらない（切り替えた分類などを保つ）
+  expect(pickerStartId('tap', copy)).toBe(pickerStartId('tap', { kind: 'key', code: 0x06, mods: [{ ...ctrl }] }))
+  expect(pickerStartId('tap', undefined)).toBe(pickerStartId('tap', undefined))
 })

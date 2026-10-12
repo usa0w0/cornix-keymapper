@@ -41,6 +41,28 @@ test('見出し、検索の欄、3つの分類を出し、最初は「キーボ�
   expect(html).not.toContain('何もしない')
 })
 
+test('いま入っている動作の分類を開き、ショートカットの修飾キーを選んだ状態で、そのキーを選択中として見せる', () => {
+  // レイヤー切り替え
+  const layer = picker({ current: { kind: 'layer', mode: 'oneShot', layer: 3 } })
+  expect(pressed(layer)).toEqual(['レイヤー切り替え', '次の1キーだけ', 'レイヤー 3'])
+  expect(pressed(picker({ slot: 'hold', slotName: '長押し', current: { kind: 'layer', mode: 'momentary', layer: 2 } }))).toEqual([
+    'レイヤー切り替え',
+    '押している間だけ',
+    'レイヤー 2',
+  ])
+  // メディア・その他
+  expect(pressed(picker({ current: { kind: 'key', code: 0xa9, mods: [] } }))).toEqual(['メディア・その他', '音量を上げる'])
+  // ショートカットと、Shift で出る記号
+  expect(pressed(picker({ current: { kind: 'key', code: 0x06, mods: [{ kind: 'ctrl', side: 'left' }] } }))).toEqual(['キーボード', 'Ctrl', 'C'])
+  expect(pressed(picker({ current: { kind: 'key', code: 0x1e, mods: [{ kind: 'shift', side: 'left' }] } }))).toEqual(['キーボード', 'Shift', '!'])
+  // 修飾キーだけの動作は、図の修飾キーそのものを選択中にし、「一緒に押す修飾キー」は選ばない
+  const rightShift = picker({ slot: 'hold', slotName: '長押し', current: { kind: 'key', mods: [{ kind: 'shift', side: 'right' }] } })
+  expect(pressed(rightShift)).toEqual(['キーボード', 'Shift'])
+  expect(rightShift).toContain('aria-pressed="true" aria-label="右 Shift"')
+  // 空の欄は「キーボード」で、何も選択中にしない
+  expect(pressed(picker())).toEqual(['キーボード'])
+})
+
 test('キーボードの図: 「一緒に押す修飾キー」と、キー1つぶん 44px の並びを出す', () => {
   const html = renderToStaticMarkup(<KeyboardChoices {...choices('tap')} />)
   expect(html).toContain('<span>一緒に押す修飾キー</span>')
@@ -59,7 +81,7 @@ test('キーボードの図: 「一緒に押す修飾キー」と、キー1つ�
 })
 
 test('キーボードの図: Shift を選んでいる時は、Shift で出る記号を出す', () => {
-  const html = renderToStaticMarkup(<KeyboardChoices {...choices('tap')} initialTogether={['shift']} />)
+  const html = renderToStaticMarkup(<KeyboardChoices {...choices('tap')} together={['shift']} />)
   expect(html).toContain('<button type="button" aria-pressed="true">Shift</button>')
   expect(html).toContain('aria-label="!（Shift + 1）" title="!（Shift + 1）">!</button>')
   expect(html).toContain('aria-label="Shift + A" title="Shift + A">A</button>')
@@ -73,7 +95,7 @@ test('キーボードの図: いま入っている動作のキーを、選択中
   expect(pressed(renderToStaticMarkup(<KeyboardChoices {...choices('tap', { kind: 'key', code: 0x1e, mods: [] })} />))).toEqual(['1'])
   // ショートカットは、同じ修飾キーを選んでいる時にだけ当たる
   expect(pressed(renderToStaticMarkup(<KeyboardChoices {...choices('tap', copy)} />))).toEqual([])
-  expect(pressed(renderToStaticMarkup(<KeyboardChoices {...choices('tap', copy)} initialTogether={['ctrl']} />))).toEqual(['Ctrl', 'C'])
+  expect(pressed(renderToStaticMarkup(<KeyboardChoices {...choices('tap', copy)} together={['ctrl']} />))).toEqual(['Ctrl', 'C'])
   // 修飾キーだけの動作は、左右を区別する
   const rightAlt: Action = { kind: 'key', mods: [{ kind: 'alt', side: 'right' }] }
   const html = renderToStaticMarkup(<KeyboardChoices {...choices('hold', rightAlt)} />)

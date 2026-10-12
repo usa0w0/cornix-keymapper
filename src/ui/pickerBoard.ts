@@ -5,6 +5,7 @@ import {
   LAYER_MODES,
   MOD_KINDS,
   type Action,
+  type ActionCategory,
   type ActionSlot,
   type LayerMode,
   type Legend,
@@ -124,9 +125,34 @@ export function layerChoices(context: PickerContext): { modes: LayerMode[]; laye
   }
 }
 
+// ---- 開いた時の見せ方。いま入っている動作が、そのまま見えるようにする ----
+
 /**
- * 切り替え方の選択を、どこから始めるかを表す文字列。欄と、いま入っている切り替え方で決まる。
- * これが変わったら、利用者が選びかけていた切り替え方を捨てて、いま入っている動作に合わせ直す
+ * 分類や修飾キーの選択を、どこから始めるかを表す文字列。欄と、いま入っている動作で決まる。
+ * これが変わったら、利用者が自分で切り替えた分類・修飾キー・切り替え方を捨てて、いま入っている動作に合わせ直す
  */
-export const layerStartId = (slot: ActionSlot, current: Action | undefined) =>
-  `${slot}:${current?.kind === 'layer' ? current.mode : ''}`
+export const pickerStartId = (slot: ActionSlot, current: Action | undefined) => `${slot}:${current ? actionId(current) : ''}`
+
+/** 最初に開く分類。いま入っている動作の分類にする。空の欄と、候補にない動作は「キーボード」 */
+export function startCategory(current: Action | undefined, context: PickerContext): ActionCategory {
+  if (current?.kind === 'layer') return 'layer'
+  if (current?.kind !== 'key') return 'keyboard'
+  // ショートカットは、修飾キーを外したキーの分類にする
+  const plain = actionId({ ...current, mods: current.code === undefined ? current.mods : [] })
+  return candidates(context).find(({ action }) => actionId(action) === plain)?.category ?? 'keyboard'
+}
+
+/**
+ * 最初に選んでおく「一緒に押す修飾キー」。ショートカットや Shift で出る記号が入っている欄では、その修飾キーにする。
+ * 図から作れるのは左側の修飾キーだけなので、右側を含む組と、修飾キーだけの動作では、何も選ばない
+ */
+export function startTogether(current: Action | undefined): ModKind[] {
+  if (current?.kind !== 'key' || current.code === undefined) return []
+  if (current.mods.some((item) => item.side === 'right')) return []
+  return MOD_KINDS.filter((kind) => current.mods.some((item) => item.kind === kind))
+}
+
+/** 最初に選んでおく切り替え方。いま入っている切り替え方にし、この欄で選べない時は、選べるものの最初にする */
+export function startLayerMode(current: Action | undefined, modes: readonly LayerMode[]): LayerMode | undefined {
+  return current?.kind === 'layer' && modes.includes(current.mode) ? current.mode : modes[0]
+}

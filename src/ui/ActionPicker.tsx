@@ -22,7 +22,10 @@ import {
   cellWidth,
   isCurrent,
   layerChoices,
-  layerStartId,
+  pickerStartId,
+  startCategory,
+  startLayerMode,
+  startTogether,
 } from './pickerBoard.ts'
 
 export interface ActionPickerProps {
@@ -47,13 +50,26 @@ interface ChoiceProps {
   onPick: (action: Action) => void
 }
 
+/** 利用者が自分で切り替えたもの。at は、切り替えた時の欄と動作（pickerStartId） */
+interface Chosen {
+  at: string
+  category?: ActionCategory
+  together?: readonly ModKind[]
+  layerMode?: LayerMode
+}
+
 const MOD_BUTTON_NAMES: Record<ModKind, string> = { ctrl: 'Ctrl', shift: 'Shift', alt: 'Alt', gui: 'GUI' }
 
 /** 動作を選ぶ部品。分類のボタンと、名前での検索を持つ。4欄・エンコーダー・コンボの出力で共用する */
 export function ActionPicker({ slot, slotName, current, layerCount, layerModes, legend, onPick }: ActionPickerProps) {
-  const [category, setCategory] = useState<ActionCategory>('keyboard')
   const [query, setQuery] = useState('')
   const context: PickerContext = { slot, layerCount, layerModes }
+  // 利用者が自分で切り替えた分類・修飾キー・切り替え方。欄か、いま入っている動作が変わったら捨てて、その動作に合わせ直す
+  const startId = pickerStartId(slot, current)
+  const [chosen, setChosen] = useState<Chosen>({ at: startId })
+  if (chosen.at !== startId) setChosen({ at: startId })
+  const own: Chosen = chosen.at === startId ? chosen : { at: startId }
+  const category = own.category ?? startCategory(current, context)
   const choice = { context, legend, current, onPick }
 
   return (
@@ -74,14 +90,21 @@ export function ActionPicker({ slot, slotName, current, layerCount, layerModes, 
         <>
           <div className="picker-tabs" role="group" aria-label="分類">
             {ACTION_CATEGORIES.map(({ id, name }) => (
-              <button type="button" key={id} aria-pressed={category === id} onClick={() => setCategory(id)}>
+              <button type="button" key={id} aria-pressed={category === id} onClick={() => setChosen({ ...own, category: id })}>
                 {name}
               </button>
             ))}
           </div>
-          {category === 'keyboard' && <KeyboardChoices {...choice} />}
-          {/* 欄か、いま入っている切り替え方が変わったら、選んでいた切り替え方を捨てて作り直す */}
-          {category === 'layer' && <LayerChoices key={layerStartId(slot, current)} {...choice} />}
+          {category === 'keyboard' && (
+            <KeyboardChoices
+              {...choice}
+              together={own.together ?? startTogether(current)}
+              onTogether={(together) => setChosen({ ...own, together })}
+            />
+          )}
+          {category === 'layer' && (
+            <LayerChoices {...choice} selected={own.layerMode} onSelect={(layerMode) => setChosen({ ...own, layerMode })} />
+          )}
           {category === 'other' && <OtherChoices {...choice} />}
         </>
       )}
@@ -112,10 +135,15 @@ export function SearchResults({ query, context, ...rest }: ChoiceProps & { query
 }
 
 /** 「キーボード」の分類。標準的なキーボードの図と、図の上の「一緒に押す修飾キー」 */
-export function KeyboardChoices({ legend, current, onPick, initialTogether = [] }: ChoiceProps & { initialTogether?: readonly ModKind[] }) {
-  const [together, setTogether] = useState<readonly ModKind[]>(initialTogether)
+export function KeyboardChoices({
+  legend,
+  current,
+  onPick,
+  together = [],
+  onTogether,
+}: ChoiceProps & { together?: readonly ModKind[]; onTogether?: (together: readonly ModKind[]) => void }) {
   const toggle = (kind: ModKind) =>
-    setTogether(together.includes(kind) ? together.filter((other) => other !== kind) : [...together, kind])
+    onTogether?.(together.includes(kind) ? together.filter((other) => other !== kind) : [...together, kind])
 
   return (
     <>
@@ -164,22 +192,27 @@ export function KeyboardChoices({ legend, current, onPick, initialTogether = [] 
 }
 
 /** 「レイヤー切り替え」の分類。切り替え方と、切り替え先のレイヤーを選ぶ */
-export function LayerChoices({ context, legend, current, onPick }: ChoiceProps) {
+export function LayerChoices({
+  context,
+  legend,
+  current,
+  onPick,
+  selected,
+  onSelect,
+}: ChoiceProps & { selected?: LayerMode; onSelect?: (mode: LayerMode) => void }) {
   const { modes, layers } = layerChoices(context)
-  // いま入っているのがレイヤー切り替えなら、その切り替え方から始める
-  const [selected, setSelected] = useState(current?.kind === 'layer' ? current.mode : undefined)
-  if (modes.length === 0 || layers.length === 0) {
+  // 利用者が選んだ切り替え方がなければ、いま入っている切り替え方から始める
+  const mode = selected !== undefined && modes.includes(selected) ? selected : startLayerMode(current, modes)
+  if (mode === undefined || layers.length === 0) {
     return <p className="picker-empty">この欄に入れられるレイヤー切り替えは、ありません。</p>
   }
-  // いま入っている切り替え方が、この欄で選べないものの時は、最初のものにする
-  const mode = selected !== undefined && modes.includes(selected) ? selected : modes[0]
 
   return (
     <>
       <div className="picker-row">
         <span>切り替え方</span>
         {modes.map((item) => (
-          <button type="button" key={item} aria-pressed={mode === item} onClick={() => setSelected(item)}>
+          <button type="button" key={item} aria-pressed={mode === item} onClick={() => onSelect?.(item)}>
             {layerModeName(item)}
           </button>
         ))}
