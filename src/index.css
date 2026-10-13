@@ -124,7 +124,9 @@ main {
   line-height: 1.4;
 }
 
-.keymap button {
+.keymap button,
+.picker button,
+.picker-preview button {
   font: inherit;
   color: inherit;
   padding: 0.35rem 0.75rem;
@@ -376,4 +378,150 @@ main {
   bottom: 4px;
   right: 50%;
   transform: translateX(50%);
+}
+
+/* ---- 動作を選ぶ部品 ---- */
+
+.picker {
+  margin-top: 0.9rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.picker-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 0.6rem;
+}
+
+.picker-title {
+  font-weight: 600;
+}
+
+.picker-bar input {
+  flex: 0 1 18rem;
+  margin-left: auto;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+/* 分類のボタンと中身の間は、広めに空ける */
+.picker-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 1.4rem;
+}
+
+.picker-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+
+.picker-row > span:first-child {
+  min-width: 8.5rem;
+  color: var(--muted);
+}
+
+.picker-tabs button,
+.picker-row button {
+  padding: 0.25rem 0.8rem;
+  border-radius: 999px;
+}
+
+.picker button[aria-pressed='true'],
+.picker-preview button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.picker-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.picker .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.picker button.chip-key {
+  min-width: 2.6rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+}
+
+/* 標準的なキーボードの図。キー1つぶんは 44px（すき間 4px）。狭い時は、図だけ横にスクロールする */
+.picker .board {
+  display: flex;
+  gap: 1.2rem;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
+}
+
+.picker .board-block {
+  flex: none;
+}
+
+.picker .board-row {
+  display: flex;
+  gap: 4px;
+  height: 44px;
+  margin-bottom: 4px;
+}
+
+.picker .board-row > span {
+  flex: none;
+}
+
+.picker button.board-key {
+  position: relative;
+  flex: none;
+  padding: 0;
+  border-radius: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.picker .board-key small {
+  position: absolute;
+  top: 1px;
+  left: 4px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+/* ---- 動作を選ぶ部品だけの見本（?picker）。編集欄（#10）につないだら消す ---- */
+
+.picker-preview {
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.picker-preview-panel {
+  margin-top: 1rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.picker-preview-panel .picker {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
