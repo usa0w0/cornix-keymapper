@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import type { LayoutDefinition } from '../device/types.ts'
 import recorded from '../device/fixtures/cornix/usb.json'
-import { boundsOf, placeKeys, type PlacedKey } from './layout.ts'
+import { boundsOf, firmwareVersionOf, placeKeys, type PlacedKey } from './layout.ts'
 
 // 実機（Cornix LP）から読んだレイアウト定義
 const cornix = recorded.snapshot.layout as LayoutDefinition
@@ -124,4 +124,14 @@ test('定義の形が違う時は、空を返す', () => {
   for (const raw of [null, {}, { layouts: {} }, { layouts: { keymap: 'x' } }, { layouts: { keymap: [1, null, [null, 3, { x: 'a' }]] } }]) {
     expect(placeKeys({ rows: 4, cols: 4, encoderCount: 0, raw })).toEqual([])
   }
+})
+
+test('レイアウト定義に書かれたファームウェアの版を取り出す。書かれていなければ undefined', () => {
+  expect(firmwareVersionOf(cornix)).toBe('V1.12')
+  const withLabels = (labels: unknown): LayoutDefinition => ({ rows: 1, cols: 1, encoderCount: 0, raw: { layouts: { labels } } })
+  expect(firmwareVersionOf(withLabels(['Split Backspace', ['Firmware Version', 'V2.0']]))).toBe('V2.0')
+  for (const labels of [undefined, 'x', [], ['Firmware Version'], [['Firmware Version']], [['Firmware Version', 1]], [['Bottom Row', 'ANSI']]]) {
+    expect(firmwareVersionOf(withLabels(labels))).toBeUndefined()
+  }
+  expect(firmwareVersionOf({ rows: 1, cols: 1, encoderCount: 0, raw: null })).toBeUndefined()
 })

@@ -7,10 +7,15 @@ import { createVialConnector } from './device/vial/connect.ts'
 
 // 使う機器の実装は、ここで選ぶ。URL に ?fake を付けると、実機の代わりに偽の機器を使う
 async function chooseConnector(): Promise<DeviceConnector> {
-  if (!new URLSearchParams(location.search).has('fake')) return createVialConnector()
+  const query = new URLSearchParams(location.search)
+  if (!query.has('fake')) return createVialConnector()
   // 偽の機器は、使う時だけ読み込む
-  const { createFakeCornix } = await import('./device/fake/cornix.ts')
-  return createFakeCornix({ stepDelayMs: 150 })
+  const [{ createFakeCornix }, { failuresFromQuery }] = await Promise.all([
+    import('./device/fake/cornix.ts'),
+    import('./device/fake/fakeDevice.ts'),
+  ])
+  // ?fake&failRead=1 で、1回目の読み出しを失敗させる（読み出しの失敗の画面を確かめるため）
+  return createFakeCornix({ stepDelayMs: 150, failures: failuresFromQuery(query) })
 }
 
 // URL に ?design を付けると、画面デザインの試作（#22）を表示する。デザインが決まったら消す

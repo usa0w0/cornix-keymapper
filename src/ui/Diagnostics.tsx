@@ -1,53 +1,40 @@
 import { useState } from 'react'
-import {
-  type KeyboardDevice,
-  type KeyboardSnapshot,
-  type ReadProgress,
-} from '../device/types.ts'
-import { KeymapView } from './KeymapView.tsx'
-import {
-  buildReadReport,
-  countDifferences,
-  describeReadError,
-  hex16,
-  type ReadReport,
-} from './readReport.ts'
+import type { KeyboardDevice } from '../device/types.ts'
+import { describeReadError, hex16, type ReadFailure, type ReadReport } from './readReport.ts'
+import { readReportFrom } from './useDeviceRead.ts'
 
-type ReadState =
-  | { status: 'idle' }
-  | { status: 'reading'; progress: ReadProgress | null }
-  | { status: 'failed'; message: string }
-  | { status: 'done'; report: ReadReport }
+interface Props {
+  device: KeyboardDevice
+  /** いま画面に出している読み出しの記録 */
+  report: ReadReport
+  /** 読み直した記録に入れ替える */
+  onReport: (report: ReadReport) => void
+}
 
-/** 本体の設定を読み出し、キーボード図と、生の値の表を表示する */
-export function ReadPanel({ device }: { device: KeyboardDevice }) {
-  const [state, setState] = useState<ReadState>({ status: 'idle' })
-  const [previous, setPrevious] = useState<KeyboardSnapshot | null>(null)
+/**
+ * 実機での確認用の診断。もう一度読み出して前回と比べる、読み出しの記録（通信の記録を含む）を保存・コピーする、
+ * 本体から読んだ生の値を見る。ふだんは使わないので、本体の情報のダイアログの中に、畳んで置く
+ */
+export function Diagnostics({ device, report, onReport }: Props) {
+  const [rereading, setRereading] = useState(false)
+  const [failure, setFailure] = useState<ReadFailure | null>(null)
   const [copied, setCopied] = useState<'done' | 'failed' | null>(null)
 
-  const read = async () => {
+  const reread = async () => {
     setCopied(null)
-    setState({ status: 'reading', progress: null })
-    const before = device.exchangeCount()
+    setFailure(null)
+    setRereading(true)
     try {
-      const snapshot = await device.read((progress) => setState({ status: 'reading', progress }))
-      const report = buildReadReport({
-        readAt: new Date(),
-        userAgent: navigator.userAgent,
-        device: { name: device.name, protocol: device.protocol },
-        snapshot,
-        differencesFromPrevious: previous && countDifferences(previous, snapshot),
-        exchanges: device.exchanges(before),
-      })
-      setPrevious(snapshot)
-      setState({ status: 'done', report })
+      onReport(await readReportFrom(device, report.snapshot))
     } catch (error) {
-      // 読みかけの内容は出さない
-      setState({ status: 'failed', message: describeReadError(error) })
+      // 読みかけの内容は出さず、前の読み出しの結果を残す
+      setFailure(describeReadError(error))
+    } finally {
+      setRereading(false)
     }
   }
 
-  const copy = async (report: ReadReport) => {
+  const copy = async () => {
     try {
       await navigator.clipboard.writeText(JSON.stringify(report))
       setCopied('done')
@@ -57,7 +44,7 @@ export function ReadPanel({ device }: { device: KeyboardDevice }) {
     }
   }
 
-  const save = (report: ReadReport) => {
+  const save = () => {
     const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 1)], { type: 'application/json' }))
     const link = document.createElement('a')
     link.href = url
@@ -67,57 +54,43 @@ export function ReadPanel({ device }: { device: KeyboardDevice }) {
   }
 
   return (
-    <section className="read" aria-label="読み出し">
-      <div className="read-actions">
-        <button type="button" onClick={read} disabled={state.status === 'reading'}>
-          {state.status === 'done' ? 'もう一度読み出して比べる' : state.status === 'failed' ? 'もう一度読み出す' : '読み出す'}
+    <details className="diagnostics">
+      <summary>診断（実機での確認用）</summary>
+      <div className="diagnostics-actions">
+        <button type="button" onClick={reread} disabled={rereading}>
+          {rereading ? '読み出し中…' : 'もう一度読み出して比べる'}
         </button>
-        {state.status === 'done' && (
-          <>
-            <button type="button" onClick={() => save(state.report)}>
-              結果をファイルに保存
-            </button>
-            <button type="button" onClick={() => copy(state.report)}>
-              結果をコピー
-            </button>
-            {copied && (
-              <span role="status">
-                {copied === 'done'
-                  ? 'コピーしました'
-                  : 'コピーできませんでした。「結果をファイルに保存」を使ってください'}
-              </span>
-            )}
-          </>
+        <button type="button" onClick={save}>
+          結果をファイルに保存
+        </button>
+        <button type="button" onClick={copy}>
+          結果をコピー
+        </button>
+        {copied && (
+          <span role="status">
+            {copied === 'done' ? 'コピーしました' : 'コピーできませんでした。「結果をファイルに保存」を使ってください'}
+          </span>
         )}
       </div>
-      {state.status === 'reading' && (
-        <p aria-live="polite">
-          読み出し中…{' '}
-          {state.progress && `${state.progress.step}（${state.progress.done} / ${state.progress.total}）`}
+      {failure && (
+        <p className="ng" role="alert">
+          読み出しに失敗しました。{failure.cause}
+          {failure.advice}
         </p>
       )}
-      {state.status === 'failed' && (
-        <p className="notice" role="alert">
-          読み出しに失敗しました。{state.message}
-        </p>
-      )}
-      {state.status === 'done' && (
-        <>
-          <KeymapView snapshot={state.report.snapshot} />
-          <ReadResult report={state.report} />
-        </>
-      )}
-    </section>
+      <ReadResult report={report} />
+    </details>
   )
 }
 
+/** 本体から読んだ生の値の表 */
 export function ReadResult({ report }: { report: ReadReport }) {
   const { snapshot, stats, differencesFromPrevious } = report
   const { layout, capabilities } = snapshot
   return (
     <>
       {differencesFromPrevious !== null && (
-        <p className={differencesFromPrevious === 0 ? 'ok' : 'notice'} role="status">
+        <p className={differencesFromPrevious === 0 ? 'ok' : 'ng'} role="status">
           {differencesFromPrevious === 0
             ? '前回の読み出しと一致しました。'
             : `前回の読み出しと ${differencesFromPrevious} か所が違います。本体の設定を変えていないのに違う場合は、読み出しがずれています。`}
