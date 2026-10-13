@@ -24,16 +24,10 @@ async function chooseConnector(): Promise<DeviceConnector> {
   return keyboard
 }
 
-// URL に ?design を付けると、画面デザインの試作（#22）を表示する。デザインが決まったら消す
-async function chooseScreen() {
-  if (new URLSearchParams(location.search).has('design')) {
-    const [{ Prototype }, { cornixSnapshot }] = await Promise.all([
-      import('./prototype/Prototype.tsx'),
-      import('./device/fake/cornix.ts'),
-    ])
-    return <Prototype snapshot={cornixSnapshot()} />
-  }
-  return <App connector={await chooseConnector()} />
-}
+const connector = await chooseConnector()
 
-createRoot(document.getElementById('root')!).render(<StrictMode>{await chooseScreen()}</StrictMode>)
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App connector={connector} />
+  </StrictMode>,
+)
