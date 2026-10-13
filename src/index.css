@@ -232,6 +232,7 @@ main {
 }
 
 .keymap .key.state-transparent .face-main,
+.keymap .key.state-transparent .face-extra,
 .keymap .key.state-transparent .face-shifted {
   opacity: 0.45;
 }
@@ -258,10 +259,22 @@ main {
   word-break: keep-all;
 }
 
-.keymap .face-main small {
+.keymap .face-main small,
+.keymap .face-extra {
   color: var(--muted);
   font-size: 9.5px;
   white-space: nowrap;
+}
+
+/* 欄の印（「長押し」「2回」「2回長」） */
+.keymap .key i {
+  margin-right: 2px;
+  padding: 0 2px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 8.5px;
+  font-style: normal;
 }
 
 .keymap .face-shifted {
