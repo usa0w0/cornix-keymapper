@@ -320,7 +320,7 @@ const list = (backups: ReturnType<typeof backupsWith>, options: { source?: typeo
     />,
   )
 
-test('バックアップの一覧: 保存した時と「この状態に戻す」を、新しい順に出す。「.vil に書き出す」は押せない', () => {
+test('バックアップの一覧: 保存した時と、「.vil に書き出す」「この状態に戻す」を、新しい順に出す', () => {
   const backups = backupsWith((_store, save) => {
     save(BEFORE, new Date(2026, 9, 11, 23, 48))
     save(TARGET, new Date(2026, 9, 12, 10, 32))
@@ -329,14 +329,17 @@ test('バックアップの一覧: 保存した時と「この状態に戻す」
   expect(html).toContain('<h2 id="backups-title">自動バックアップ</h2>')
   expect(html).toContain('書き込むたびに、その直前の本体の設定を、このブラウザーの中に保存しています（直近 5 回ぶん）。')
   expect(html.indexOf('2026-10-12 10:32')).toBeLessThan(html.indexOf('2026-10-11 23:48'))
-  expect(count(html, '<button type="button" disabled="" title="準備中">.vil に書き出す</button>')).toBe(2)
+  // いまの本体と同じ内容のものも、書き出せる
+  expect(count(html, '.vil に書き出す</button>')).toBe(2)
+  expect(html).toContain('<button type="button" aria-label="2026-10-12 10:32 のバックアップを .vil に書き出す">.vil に書き出す</button>')
+  expect(html).toContain('<button type="button" aria-label="2026-10-11 23:48 のバックアップを .vil に書き出す">.vil に書き出す</button>')
   expect(html).toContain('<button type="button" aria-label="2026-10-11 23:48 の状態に戻す">この状態に戻す</button>')
   // いまの本体と同じ内容のものは、戻すものがない
   expect(html).toContain('書き込みの直前の設定<span class="backups-note">（いまの本体と同じ内容です）</span>')
   expect(html).toContain('<button type="button" disabled="" aria-label="2026-10-12 10:32 の状態に戻す">この状態に戻す</button>')
   expect(html).toContain('「この状態に戻す」は、すぐには書き込みません。変更点を確かめてから「本体に書き込む」を押します。')
   expect(html).toContain('バックアップは、開発版とリリース版で別々に保存されます（いま見ているのはリリース版）。')
-  expect(html).toContain('ブラウザーで、このサイトのデータを消すと、バックアップも消えます。')
+  expect(html).toContain('ブラウザーで、このサイトのデータを消すと、バックアップも消えます。残しておきたいものは、.vil に書き出してください。')
 })
 
 test('バックアップの一覧: 開発版では、そう出す。編集がある時は、戻した設定の上に残ることを出す', () => {

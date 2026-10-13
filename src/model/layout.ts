@@ -94,6 +94,26 @@ function placeLabel(label: string, placement: Placement, layout: LayoutDefinitio
   return { ...placement, kind: 'key', row: a, col: b, index: a * layout.cols + b }
 }
 
+/**
+ * 行列の位置のうち、レイアウト定義にキーがある位置（行 × 列数 + 列）。配列の選択肢で使わない候補のキーも含める。
+ * .vil は、ここにない位置を -1 で持つ（Vial は、定義にあるキーだけをキーマップとして扱う）
+ */
+export function definedKeys(layout: LayoutDefinition): Set<number> {
+  const keymap = (layout.raw as { layouts?: { keymap?: unknown } } | null)?.layouts?.keymap
+  const keys = new Set<number>()
+  for (const row of Array.isArray(keymap) ? keymap : []) {
+    for (const item of Array.isArray(row) ? row : []) {
+      if (typeof item !== 'string') continue
+      const labels = item.split('\n')
+      const position = pairOf(labels[0])
+      if (!position || labels[LABEL_ENCODER] === 'e') continue
+      const [r, c] = position
+      if (r < layout.rows && c < layout.cols) keys.add(r * layout.cols + c)
+    }
+  }
+  return keys
+}
+
 export interface Bounds {
   minX: number
   minY: number

@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import type { ConnectionState } from './useConnection.ts'
 import type { SlotCount } from './deviceInfo.ts'
 import { isDevSite } from './site.ts'
@@ -14,6 +15,10 @@ interface Props {
   onWrite: (() => void) | null
   /** 自動バックアップの一覧を開く */
   onBackups: () => void
+  /** 画面の内容を .vil に保存する（保存の前の確認を開く） */
+  onSaveVil: () => void
+  /** 利用者が選んだ .vil を読み込む */
+  onLoadVil: (file: File) => void
   onConnect: () => void
   onDisconnect: () => void
   /** 本体の情報のダイアログを開く。接続中の機器を読み終えるまでは null */
@@ -21,7 +26,20 @@ interface Props {
 }
 
 /** ヘッダー。タイトル、接続の状態、残り枠数と、保存・書き込みのボタン */
-export function AppHeader({ connection, supported, slots, changes, onWrite, onBackups, onConnect, onDisconnect, onDeviceInfo }: Props) {
+export function AppHeader({
+  connection,
+  supported,
+  slots,
+  changes,
+  onWrite,
+  onBackups,
+  onSaveVil,
+  onLoadVil,
+  onConnect,
+  onDisconnect,
+  onDeviceInfo,
+}: Props) {
+  const file = useRef<HTMLInputElement>(null)
   return (
     <header className="app-header">
       <h1>
@@ -62,13 +80,25 @@ export function AppHeader({ connection, supported, slots, changes, onWrite, onBa
           <button type="button" title="自動バックアップの一覧を見る" onClick={onBackups}>
             バックアップ
           </button>
-          {/* 次の2つは置き場所だけ。中身は #16 */}
-          <button type="button" disabled title="準備中">
+          <button type="button" title="この画面の内容を、Vial と同じ形式のファイルに保存する" onClick={onSaveVil}>
             .vil に保存
           </button>
-          <button type="button" disabled title="準備中">
+          <button type="button" title="Vial やこのサイトで保存したファイルを、この画面に読み込む" onClick={() => file.current?.click()}>
             .vil を読み込む
           </button>
+          {/* ファイルを選ぶ部品は見せず、上のボタンから開く。同じファイルを続けて選べるように、選んだら空に戻す */}
+          <input
+            ref={file}
+            type="file"
+            accept=".vil,application/json"
+            hidden
+            aria-label=".vil ファイルを選ぶ"
+            onChange={(event) => {
+              const chosen = event.target.files?.[0]
+              event.target.value = ''
+              if (chosen) onLoadVil(chosen)
+            }}
+          />
           {/* 押すと、変更点の確認のダイアログが出る。接続が切れている間も、変更点を見て、取り消せる */}
           <button
             type="button"
