@@ -8,9 +8,14 @@ import { DeviceInfoDialog } from './DeviceInfoDialog.tsx'
 import { slotCounts } from './deviceInfo.ts'
 import { ReadResult } from './Diagnostics.tsx'
 import { buildReadReport, describeReadError } from './readReport.ts'
+import { ReloadDialog } from './ReloadDialog.tsx'
+import { SessionBanner } from './SessionBanner.tsx'
 import { ConnectStage, ReadFailedStage, ReadingStage } from './Stage.tsx'
-import { describeError, formatDuration, type ConnectionState } from './useConnection.ts'
-import { readReportFrom, readStateFor, replaceReport, runRead, type HeldRead } from './useDeviceRead.ts'
+import { describeError, disconnectedNotice, formatDuration, type ConnectionState } from './useConnection.ts'
+import { readReportFrom, readStateFor, replaceReport, runRead, type HeldRead, type ReadState } from './useDeviceRead.ts'
+import { EMPTY_SESSION, sessionReducer } from '../session/editState.ts'
+import { DebugEditPanel } from './DebugEditPanel.tsx'
+import { EditSessionContext } from './editContext.ts'
 
 const device: KeyboardDevice = {
   name: 'Cornix',
@@ -32,15 +37,16 @@ const report = buildReadReport({
   exchanges: [{ request: '01', response: '010009', ms: 12 }],
 })
 
-const header = (connection: ConnectionState, options: { supported?: boolean; read?: boolean } = {}) =>
+const header = (connection: ConnectionState, options: { supported?: boolean; read?: boolean; changes?: number } = {}) =>
   renderToStaticMarkup(
     <AppHeader
       connection={connection}
       supported={options.supported ?? true}
       slots={options.read ? slotCounts(report.snapshot) : null}
+      changes={options.changes ?? 0}
       onConnect={() => {}}
       onDisconnect={() => {}}
-      onDeviceInfo={() => {}}
+      onDeviceInfo={options.read && connection.status === 'connected' ? () => {} : null}
     />,
   )
 
@@ -206,7 +212,9 @@ function heldStore() {
 test('読み出しの流れ: 読み込み中 → いま読んでいるもの → 読み終えた内容、の順に知らせる', async () => {
   const fake = await createFakeCornix().connect()
   const store = heldStore()
-  await runRead(fake, 1, store.set)
+  // 読み終えた記録を返す（編集中の状態に渡すため）
+  const read = await runRead(fake, 1, store.set)
+  expect(read?.snapshot).toEqual(cornixSnapshot())
 
   expect(store.history[0].state).toEqual({ status: 'reading', progress: null })
   expect(store.history[2].state).toEqual({ status: 'reading', progress: { step: 'キーマップ', done: 0, total: 1 } })
@@ -217,7 +225,7 @@ test('読み出しの流れ: 読み込み中 → いま読んでいるもの →
 test('読み出しの流れ: 失敗したら、読みかけの内容を持たず、原因だけを知らせる', async () => {
   const fake = await createFakeCornix({ failures: { failReadAt: { read: 1 } } }).connect()
   const store = heldStore()
-  await runRead(fake, 1, store.set)
+  expect(await runRead(fake, 1, store.set)).toBeNull()
   expect(store.get()!.state).toEqual({
     status: 'failed',
     failure: describeReadError(new DeviceError('timeout', { step: 'キーマップ' })),
@@ -283,4 +291,117 @@ test('診断で読み直した結果は、その機器の読み出しが終わ�
   // 別の機器の結果では入れ替えない
   expect(replaceReport(store.get(), other, reread)).toBe(store.get())
   expect(replaceReport(store.get(), fake, reread)).toMatchObject({ device: fake, run: 1, state: { status: 'done', report: reread } })
+})
+
+test('ヘッダーの「書き込み」に、編集の数を出す。押せないまま', () => {
+  const html = header({ status: 'connected', device }, { read: true, changes: 3 })
+  expect(html).toContain('<button type="button" class="primary" disabled="" title="準備中">書き込み（変更 3 件）</button>')
+})
+
+test('接続が切れた後のヘッダー: 残り枠数とボタンは出したまま、「未接続」と「接続」にする', () => {
+  const html = header({ status: 'disconnected', lostAfterMs: 1000 }, { read: true, changes: 1 })
+  expect(html).toContain('未接続</span><button type="button">接続</button>')
+  expect(html).toContain('Tap Dance 残り <b>30</b> / 32')
+  expect(html).toContain('書き込み（変更 1 件）')
+  expect(html).not.toContain('▾')
+})
+
+test('つなぎ直して読み直している間のヘッダー: 読み終えるまで、本体の情報は開けない', () => {
+  const html = renderToStaticMarkup(
+    <AppHeader
+      connection={{ status: 'connected', device }}
+      supported
+      slots={slotCounts(report.snapshot)}
+      changes={1}
+      onConnect={() => {}}
+      onDisconnect={() => {}}
+      onDeviceInfo={null}
+    />,
+  )
+  expect(html).toContain('<span class="chip chip-off">接続済み: Cornix</span>')
+  expect(html).toContain('書き込み（変更 1 件）')
+})
+
+const banner = (connection: ConnectionState, options: { changes?: number; reading?: ReadState | null; supported?: boolean } = {}) =>
+  renderToStaticMarkup(
+    <SessionBanner
+      connection={connection}
+      reading={options.reading ?? null}
+      supported={options.supported ?? true}
+      changes={options.changes ?? 0}
+      onConnect={() => {}}
+      onRetry={() => {}}
+    />,
+  )
+
+test('接続が切れた時の帯: 編集が残っていることと、「接続」を出す', () => {
+  const html = banner({ status: 'disconnected', notice: '使わない', lostAfterMs: 185_000 }, { changes: 2 })
+  expect(html).toBe(
+    '<p class="banner banner-warning" role="alert">キーボードとの接続が切れました。編集した内容（2 件）は画面に残っています。' +
+      'つなぎ直してから「接続」を押してください。（接続していた時間: 3 分 5 秒）<button type="button" class="primary">接続</button></p>',
+  )
+  // 編集がなければ、件数の文を出さない
+  expect(banner({ status: 'disconnected', lostAfterMs: 1000 })).toContain('接続が切れました。つなぎ直してから')
+})
+
+test('接続していない間の帯: 自分で切った時、接続できなかった時、接続中、非対応ブラウザー', () => {
+  expect(disconnectedNotice({ status: 'disconnected' }, 1)).toBe(
+    'キーボードとの接続を切りました。編集した内容（1 件）は画面に残っています。続けるには「接続」を押してください。',
+  )
+  expect(disconnectedNotice({ status: 'disconnected', notice: describeError(new DeviceError('timeout')) }, 1)).toBe(
+    'キーボードから応答がありません。電源と接続を確かめて、もう一度「接続」を押してください。編集した内容（1 件）は画面に残っています。',
+  )
+  const connecting = banner({ status: 'connecting' }, { changes: 1 })
+  expect(connecting).toContain('キーボードに接続しています…編集した内容（1 件）は画面に残っています。')
+  expect(connecting).toContain('disabled="">接続中…</button>')
+  expect(banner({ status: 'disconnected' }, { supported: false })).toContain('disabled="">接続</button>')
+})
+
+test('つなぎ直した後の帯: 読み直している間はその旨を、失敗したら原因と「もう一度読み出す」を出す。読み終えたら出さない', () => {
+  const connected: ConnectionState = { status: 'connected', device }
+  const reading = banner(connected, { reading: { status: 'reading', progress: { step: 'キーマップ', done: 0, total: 1 } } })
+  expect(reading).toBe('<p class="banner banner-warning" role="status">本体の設定を読み直しています…（キーマップ）</p>')
+  const failed = banner(connected, {
+    reading: { status: 'failed', failure: describeReadError(new DeviceError('timeout', { step: 'キーマップ' })) },
+  })
+  expect(failed).toContain('本体の設定を読み直せませんでした。「キーマップ」を読んでいる途中で、キーボードから応答がなくなりました。')
+  expect(failed).toContain('もう一度読み出す</button>')
+  expect(banner(connected, { reading: { status: 'done', report } })).toBe('')
+})
+
+test('本体の設定が変わっていた時のダイアログ: 編集を当て直すか、捨てるか、やめるかを選ばせる', () => {
+  const html = renderToStaticMarkup(
+    <ReloadDialog pending={{ reason: 'changed', fresh: cornixSnapshot() }} changes={2} onChoose={() => {}} />,
+  )
+  expect(html).toContain('<h2 id="reload-title" class="ng">本体の設定が変わっています</h2>')
+  expect(html).toContain('編集した内容（2 件）を、読み直した内容の上に当て直して続けるか')
+  expect(html).toContain(
+    '<button type="button">やめる</button><button type="button" class="">編集を捨てる</button>' +
+      '<button type="button" class="primary">編集を当て直して続ける</button>',
+  )
+})
+
+test('別の機器だった時のダイアログ: 編集を捨てる前に確認する。当て直す選択肢は出さない', () => {
+  const html = renderToStaticMarkup(
+    <ReloadDialog pending={{ reason: 'other-device', fresh: cornixSnapshot() }} changes={1} onChoose={() => {}} />,
+  )
+  expect(html).toContain('前とは別のキーボードです')
+  expect(html).toContain('編集した内容（1 件）は、前のキーボードのものなので、このキーボードには使えません。')
+  expect(html).toContain('<button type="button">やめる</button><button type="button" class="primary">編集を捨てて、このキーボードを読み込む</button></div>')
+  expect(html).not.toContain('当て直して続ける')
+})
+
+test('仮の入口（?fake&debugEdit）は、偽の機器への操作を渡した時だけ、読み出した後に出す', () => {
+  const tools = { loseConnection: () => {}, alterDevice: () => {}, switchDevice: () => {} }
+  // 読み出す前は出さない
+  expect(renderToStaticMarkup(<App connector={createFakeCornix()} supported debug={tools} />)).not.toContain('debug-panel')
+  const session = sessionReducer(EMPTY_SESSION, { type: 'read', snapshot: cornixSnapshot() })
+  const html = renderToStaticMarkup(
+    <EditSessionContext value={{ session, dispatch: () => {} }}>
+      <DebugEditPanel tools={tools} />
+    </EditSessionContext>,
+  )
+  for (const name of ['編集を1件足す', '偽の機器の接続を切る', '偽の機器の中身を書き換える', '偽の機器を別の機器にする']) {
+    expect(html).toContain(`${name}</button>`)
+  }
 })

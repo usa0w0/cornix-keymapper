@@ -110,6 +110,33 @@ main {
   background: #b3261e;
 }
 
+.banner-warning {
+  background: #9a5b00;
+}
+
+.app .banner button.primary {
+  border-color: #fff;
+  background: #fff;
+  color: #1f2328;
+}
+
+/* 確認用の仮の入口（?fake&debugEdit）。編集欄（#10）ができたら消す */
+.debug-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.3rem 1rem;
+  border-bottom: 1px dashed var(--line);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.dialog p {
+  margin: 0 0 0.7rem;
+}
+
 .app-header {
   display: flex;
   flex-wrap: wrap;

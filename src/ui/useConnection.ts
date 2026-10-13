@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { DeviceError, type DeviceConnector, type KeyboardDevice } from '../device/types.ts'
 
 export type ConnectionState =
-  | { status: 'disconnected'; notice?: string }
+  /** lostAfterMs は、こちらから切ったのではなく、機器がなくなった時の、接続していた時間 */
+  | { status: 'disconnected'; notice?: string; lostAfterMs?: number }
   | { status: 'connecting' }
   | { status: 'connected'; device: KeyboardDevice }
 
@@ -34,9 +35,11 @@ export function useConnection(connector: DeviceConnector) {
     if (!device) return
     const connectedAt = Date.now()
     return device.onDisconnect(() => {
+      const lostAfterMs = Date.now() - connectedAt
       setState({
         status: 'disconnected',
-        notice: `キーボードとの接続が切れました。つなぎ直してから「接続」を押してください。（接続していた時間: ${formatDuration(Date.now() - connectedAt)}）`,
+        notice: `キーボードとの接続が切れました。つなぎ直してから「接続」を押してください。（接続していた時間: ${formatDuration(lostAfterMs)}）`,
+        lostAfterMs,
       })
     })
   }, [device])
@@ -48,6 +51,19 @@ export function useConnection(connector: DeviceConnector) {
 export function formatDuration(ms: number): string {
   const seconds = Math.round(ms / 1000)
   return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
+}
+
+/** 接続していない間の知らせ。編集が残っていることを添える */
+export function disconnectedNotice(connection: ConnectionState, changes: number): string {
+  const kept = changes > 0 ? `編集した内容（${changes} 件）は画面に残っています。` : ''
+  if (connection.status === 'connecting') return `キーボードに接続しています…${kept}`
+  if (connection.status === 'connected') return ''
+  if (connection.lostAfterMs !== undefined) {
+    return `キーボードとの接続が切れました。${kept}つなぎ直してから「接続」を押してください。（接続していた時間: ${formatDuration(connection.lostAfterMs)}）`
+  }
+  // 接続できなかった時は、その理由を出す
+  if (connection.notice) return `${connection.notice}${kept}`
+  return `キーボードとの接続を切りました。${kept}続けるには「接続」を押してください。`
 }
 
 export function describeError(error: unknown): string {
