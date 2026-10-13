@@ -27,6 +27,12 @@ import type { Transport } from './transport.ts'
 /** 通信の記録を持つ数。古いものから捨てる */
 const MAX_EXCHANGES = 5000
 
+/** 応答の遅れなどで読み出しを最初からやり直す回数の上限。超えたら、読み出しを失敗にする */
+const MAX_READ_RESTARTS = 2
+
+// 画面には「「…」を読んでいます」と出る
+const SYNC_CHECK_STEP = 'VIA の版（読み出しの確認）'
+
 const toHex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
 
 /** 診断用の通信の記録。Transport の onExchange に record を渡して使う */
@@ -41,7 +47,16 @@ export class ExchangeLog {
   }
 
   readonly record = (request: Uint8Array, response: Uint8Array | null, ms: number): void => {
-    this.records.push({ request: toHex(request), response: response && toHex(response), ms: Math.round(ms) })
+    this.push({ request: toHex(request), response: response && toHex(response), ms: Math.round(ms) })
+  }
+
+  /** どの要求への応答でもないとして捨てた応答。要求を空にして記録する。Transport の onStray に渡して使う */
+  readonly recordStray = (response: Uint8Array): void => {
+    this.push({ request: '', response: toHex(response), ms: 0 })
+  }
+
+  private push(record: ExchangeRecord): void {
+    this.records.push(record)
     if (this.records.length > this.capacity) {
       this.records.shift()
       this.dropped++
@@ -122,8 +137,41 @@ export class VialDevice implements KeyboardDevice {
     return this.log.list(since)
   }
 
+  /**
+   * 読み出しの途中で、応答が待ち時間を超えて遅れた時と、どの要求のものでもない応答が届いた時は、
+   * それまでに読んだ内容に取り違えた応答が混じっているおそれがあるので、捨てて最初からやり直す
+   */
   async read(onProgress?: (progress: ReadProgress) => void): Promise<KeyboardSnapshot> {
-    const request: Requester = (payload) => this.transport.request(payload)
+    for (let restarts = 0; ; restarts++) {
+      const { timeoutCount, strayCount } = this.transport
+      let failure: unknown
+      try {
+        const snapshot = await this.readOnce(onProgress)
+        if (snapshot) return snapshot
+        failure = new DeviceError('unexpected-response', { step: SYNC_CHECK_STEP })
+      } catch (error) {
+        const disturbed =
+          this.transport.timeoutCount !== timeoutCount || this.transport.strayCount !== strayCount
+        const retryable =
+          error instanceof DeviceError && (error.kind === 'timeout' || error.kind === 'unexpected-response')
+        // 応答の遅れなどが起きていない失敗は、やり直しても同じ結果になる
+        if (!disturbed || !retryable) throw error
+        failure = error
+      }
+      if (restarts >= MAX_READ_RESTARTS) throw failure
+    }
+  }
+
+  /** 1回ぶんの読み出し。最後の確認で、応答がずれていたと分かった時は null */
+  private async readOnce(onProgress?: (progress: ReadProgress) => void): Promise<KeyboardSnapshot | null> {
+    const { timeoutCount, strayCount } = this.transport
+    const request: Requester = async (payload, echo) => {
+      const response = await this.transport.request(payload, echo)
+      // 送り直しで応答が得られても、この読み出しは使わない
+      if (this.transport.timeoutCount !== timeoutCount) throw new DeviceError('timeout')
+      if (this.transport.strayCount !== strayCount) throw new DeviceError('unexpected-response')
+      return response
+    }
     let step = ''
     // 失敗した時に、どこを読んでいたかを添える
     const during = async <T>(name: string, run: () => Promise<T>): Promise<T> => {
@@ -189,6 +237,14 @@ export class VialDevice implements KeyboardDevice {
       // 診断用。書き込みにロック解除が要るかを、通信の記録から読み取れるようにする。結果は使わない。
       // 通信の失敗（タイムアウトや切断）は、ほかの読み出しと同じく失敗にする
       await during('ロックの状態', () => getUnlockStatus(request))
+
+      // Vial のコマンドの応答は要求と突き合わせられないので、途中で応答が1つずれていても、ここまで気づけない。
+      // 最後に、応答を突き合わせられる VIA のコマンドをもう一度送って、ずれていないことを確かめる
+      if ((await during(SYNC_CHECK_STEP, () => getViaProtocolVersion(request))) !== viaProtocol) {
+        // ずれたままやり直すと、次の読み出しもずれる
+        this.transport.requireResync()
+        return null
+      }
 
       return {
         uid,

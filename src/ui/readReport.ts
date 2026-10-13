@@ -4,17 +4,22 @@ import { DeviceError, type ExchangeRecord, type KeyboardSnapshot } from '../devi
 export interface ExchangeStats {
   count: number
   timeouts: number
+  /** どの要求への応答でもないとして捨てた応答の数 */
+  strays: number
   totalMs: number
   averageMs: number
   maxMs: number
 }
 
-export function summarizeExchanges(exchanges: ExchangeRecord[]): ExchangeStats {
+export function summarizeExchanges(records: ExchangeRecord[]): ExchangeStats {
+  // 要求が空の記録は、捨てた応答。通信の回数には数えない
+  const exchanges = records.filter((e) => e.request !== '')
   const answered = exchanges.filter((e) => e.response !== null)
   const totalMs = exchanges.reduce((sum, e) => sum + e.ms, 0)
   return {
     count: exchanges.length,
     timeouts: exchanges.length - answered.length,
+    strays: records.length - exchanges.length,
     totalMs,
     averageMs: answered.length ? Math.round(answered.reduce((sum, e) => sum + e.ms, 0) / answered.length) : 0,
     maxMs: answered.reduce((max, e) => Math.max(max, e.ms), 0),
@@ -75,7 +80,8 @@ export function buildReadReport(input: {
     differencesFromPrevious: input.differencesFromPrevious,
     stats: summarizeExchanges(input.exchanges),
     snapshot: input.snapshot,
-    exchangeFormat: '要求>応答@ミリ秒。16 進で、末尾の 00 は省く。応答なし（タイムアウト）は -',
+    exchangeFormat:
+      '要求>応答@ミリ秒。16 進で、末尾の 00 は省く。応答なし（タイムアウト）は -。要求が空のものは、どの要求への応答でもないとして捨てた応答',
     exchanges: input.exchanges.map(
       (e) => `${trimZeros(e.request)}>${e.response === null ? '-' : trimZeros(e.response)}@${e.ms}`,
     ),

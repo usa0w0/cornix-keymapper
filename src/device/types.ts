@@ -89,6 +89,7 @@ export interface ReadProgress {
 
 /** 診断用の、要求と応答1組の記録。バイト列は 16 進の文字列 */
 export interface ExchangeRecord {
+  /** どの要求への応答でもないとして捨てた応答の記録では、空の文字列 */
   request: string
   /** 応答がなかった時（タイムアウト）は null */
   response: string | null

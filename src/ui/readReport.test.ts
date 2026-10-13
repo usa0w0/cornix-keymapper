@@ -17,8 +17,10 @@ test('通信の回数、タイムアウト、かかった時間をまとめる',
     { request: '01', response: '010009', ms: 10 },
     { request: '11', response: null, ms: 1000 },
     { request: '11', response: '1104', ms: 30 },
+    // どの要求への応答でもないとして捨てた応答
+    { request: '', response: '1104', ms: 0 },
   ])
-  expect(stats).toEqual({ count: 3, timeouts: 1, totalMs: 1040, averageMs: 20, maxMs: 30 })
+  expect(stats).toEqual({ count: 3, timeouts: 1, strays: 1, totalMs: 1040, averageMs: 20, maxMs: 30 })
 })
 
 test('キーコードを 4 桁の 16 進で表す', () => {

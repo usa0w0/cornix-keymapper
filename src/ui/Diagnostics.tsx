@@ -107,7 +107,7 @@ export function ReadResult({ report }: { report: ReadReport }) {
           <Row label="Combo の枠数" value={capabilities.comboCount} />
           <Row
             label="通信"
-            value={`${stats.count} 回、合計 ${(stats.totalMs / 1000).toFixed(1)} 秒、平均 ${stats.averageMs} ミリ秒、最長 ${stats.maxMs} ミリ秒、タイムアウト ${stats.timeouts} 回`}
+            value={`${stats.count} 回、合計 ${(stats.totalMs / 1000).toFixed(1)} 秒、平均 ${stats.averageMs} ミリ秒、最長 ${stats.maxMs} ミリ秒、タイムアウト ${stats.timeouts} 回、捨てた応答 ${stats.strays} 回`}
           />
         </tbody>
       </table>
