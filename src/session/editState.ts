@@ -430,6 +430,15 @@ export function buildTarget(state: EditState, applyEdits: ApplyEdits = encodeEdi
   return target
 }
 
+/** 書き込む目標。目標を作れない編集（Tap Dance の枠が足りない、など）がある間は null（書き込みを始めない） */
+export function tryBuildTarget(state: EditState): KeyboardSnapshot | null {
+  try {
+    return buildTarget(state)
+  } catch {
+    return null
+  }
+}
+
 // ---- 画面から使う形（useReducer に渡す） ----
 
 /**
@@ -460,6 +469,8 @@ export type SessionAction =
   /** 本体の読み出しが終わった（最初の読み出し、つなぎ直した後の読み直し） */
   | { type: 'read'; snapshot: KeyboardSnapshot }
   | { type: 'resolve'; choice: ReloadChoice }
+  /** 編集を捨てて、読み直した内容から始め直す（書き込み前に本体の設定が変わっていた時の「本体から読み込み直す」） */
+  | { type: 'reload'; snapshot: KeyboardSnapshot }
   /** キーの動作を変える。Tap Dance の枠が足りなくなる編集は、反映しない（tryEditKey） */
   | { type: 'editKey'; layer: number; key: number; behavior: KeyBehavior; overwriteUnused?: boolean }
   /** 共有中のキーを、連動して同じ動作に変える。枠が足りなくなる編集は、反映しない（tryEditKeysTogether） */
@@ -508,7 +519,7 @@ function resolve(session: EditSession, choice: ReloadChoice): EditSession {
   }
 }
 
-function applyToEdit(edit: EditState, action: Exclude<SessionAction, { type: 'read' | 'resolve' }>): EditState {
+function applyToEdit(edit: EditState, action: Exclude<SessionAction, { type: 'read' | 'resolve' | 'reload' }>): EditState {
   switch (action.type) {
     case 'editKey':
       return tryEditKey(edit, action.layer, action.key, action.behavior, action.overwriteUnused).state
@@ -536,6 +547,7 @@ function applyToEdit(edit: EditState, action: Exclude<SessionAction, { type: 're
 export function sessionReducer(session: EditSession, action: SessionAction): EditSession {
   if (action.type === 'read') return receive(session, action.snapshot)
   if (action.type === 'resolve') return resolve(session, action.choice)
+  if (action.type === 'reload') return { edit: loadSnapshot(action.snapshot), pending: null }
   // 読み出す前と、選択待ちの間は、編集を受け付けない
   if (!session.edit || session.pending) return session
   const edit = applyToEdit(session.edit, action)

@@ -10,6 +10,10 @@ interface Props {
   /** 取り消しを、編集中の状態に送る */
   onAction: (action: SessionAction) => void
   onClose: () => void
+  /** 「本体に書き込む」を押した時。押せない間は、その理由（画面に出す） */
+  write: { onWrite: () => void } | { blocked: string }
+  /** 使用中の Tap Dance の枠の中身を、書き換えるしかない書き込みか（model/diff.ts の rewritesUsedTapDance） */
+  rewritesUsed?: boolean
   /** 最初から、「すべて取り消す」の確認を出しておく（テスト用） */
   initialConfirmAll?: boolean
   /** 最初から、取り消せなかった行として示しておく変更（テスト用） */
@@ -23,9 +27,18 @@ const revertLabel = (change: Change) =>
 /**
  * 変更点の確認のダイアログ。ヘッダーの「書き込み（変更 n 件）」から開く。
  * 「場所 / いま → 書き込む内容」の表を出し、行ごとの「取り消す」と、「すべて取り消す」を置く。
- * 「本体に書き込む」は置き場所だけで、押せない（書き込みの手順は #15）
+ * 「本体に書き込む」を押すと、書き込みの流れ（WriteDialog）に進む。書き込めない間は、押せなくして、理由を出す
  */
-export function ChangeListDialog({ state, changes, onAction, onClose, initialConfirmAll = false, initialRefused }: Props) {
+export function ChangeListDialog({
+  state,
+  changes,
+  onAction,
+  onClose,
+  write,
+  rewritesUsed = false,
+  initialConfirmAll = false,
+  initialRefused,
+}: Props) {
   const dialog = useRef<HTMLDialogElement>(null)
   // 「すべて取り消す」は、押し間違えると編集がすべて消えるので、もう一度確かめる
   const [confirmAll, setConfirmAll] = useState(initialConfirmAll)
@@ -127,6 +140,18 @@ export function ChangeListDialog({ state, changes, onAction, onClose, initialCon
           </table>
         </div>
       )}
+      {changes.length > 0 && <p className="write-note">書き込む前に、いまの本体の設定を自動でバックアップします。</p>}
+      {rewritesUsed && (
+        <p className="write-caution">
+          この書き込みでは、いま使っている Tap Dance
+          の枠の中身を書き換えます（空いている枠がないため）。書き込みの途中で失敗すると、その枠を使うキーが、変える前とも後とも違う動作になることがあります。その時は、「再試行」か「書き込み前の状態に戻す」で直せます。
+        </p>
+      )}
+      {'blocked' in write && changes.length > 0 && (
+        <p className="write-blocked" role="status">
+          {write.blocked}
+        </p>
+      )}
       <div className="dialog-actions">
         {confirmAll ? (
           <span className="changes-all" role="alert">
@@ -148,8 +173,13 @@ export function ChangeListDialog({ state, changes, onAction, onClose, initialCon
         <button type="button" className="changes-close" onClick={onClose}>
           閉じる
         </button>
-        {/* 置き場所だけ。書き込み・照合・自動バックアップは #15 */}
-        <button type="button" className="primary" disabled title="準備中">
+        <button
+          type="button"
+          className="primary"
+          disabled={'blocked' in write}
+          title={'blocked' in write ? write.blocked : undefined}
+          onClick={'onWrite' in write ? write.onWrite : undefined}
+        >
           本体に書き込む
         </button>
       </div>

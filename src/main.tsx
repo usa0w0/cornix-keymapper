@@ -14,10 +14,12 @@ async function chooseConnector(): Promise<DeviceConnector> {
     import('./device/fake/cornix.ts'),
     import('./device/fake/fakeDevice.ts'),
   ])
-  // ?fake&failRead=1 で、1回目の読み出しを失敗させる（読み出しの失敗の画面を確かめるため）
+  // ?fake&failRead=1 で、1回目の読み出しを失敗させる（読み出しの失敗の画面を確かめるため）。
+  // 書き込みの失敗（failWrite、disconnectWrite、alterRead）も、同じ形で指定できる
   const keyboard = createFakeCornix({ stepDelayMs: 150, failures: failuresFromQuery(query) })
   // 偽の機器は、開発者ツールのコンソールから操作できるようにする（画面には入口を出さない）。
-  // 接続を切る: fakeKeyboard.loseConnection()、中身を書き換える・別の機器にする: fakeKeyboard.snapshot を書き換える
+  // 接続を切る: fakeKeyboard.loseConnection()、中身を書き換える・別の機器にする: fakeKeyboard.snapshot を書き換える、
+  // 次の書き込みを失敗させる: fakeKeyboard.failures.failWriteAt = { operation: fakeKeyboard.writeCount + 2 }
   Object.assign(window, { fakeKeyboard: keyboard })
   return keyboard
 }

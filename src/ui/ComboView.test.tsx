@@ -184,6 +184,7 @@ test('ヘッダーのコンボの残り枠数は、編集に合わせて増減�
       slots={editSlotCounts(state)}
       changes={2}
       onWrite={() => {}}
+      onBackups={() => {}}
       onConnect={() => {}}
       onDisconnect={() => {}}
       onDeviceInfo={null}

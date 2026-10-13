@@ -172,6 +172,22 @@ test('URL の指定から、読み出しの失敗を作る。指定がない時�
   expect(from('fake&failRead=x')).toEqual({})
 })
 
+test('URL の指定から、書き込みの失敗、書き込み中の切断、照合の不一致を作る', async () => {
+  const from = (query: string) => failuresFromQuery(new URLSearchParams(query))
+  expect(from('fake&failWrite=2')).toEqual({ failWriteAt: { operation: 2, kind: undefined } })
+  expect(from('fake&failWrite=3&failKind=send-failed')).toEqual({ failWriteAt: { operation: 3, kind: 'send-failed' } })
+  expect(from('fake&disconnectWrite=4')).toEqual({ disconnectAtWrite: 4 })
+  expect(from('fake&failWrite=0&disconnectWrite=x')).toEqual({})
+
+  // alterRead=2 で、2 回目の読み出しだけ、レイヤー 0 の最初のキーが違う値で読める
+  const keyboard = createFakeCornix({ failures: from('fake&alterRead=2') })
+  const device = await keyboard.connect()
+  const first = await device.read()
+  const second = await device.read()
+  expect(second.keymap[0][0]).not.toBe(first.keymap[0][0])
+  expect(await device.read()).toEqual(first)
+})
+
 test('ほかから設定を変えられた場合を、本体の中身を直接書き換えてまねられる', async () => {
   const keyboard = createFakeCornix()
   const device = await keyboard.connect()
