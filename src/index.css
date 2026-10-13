@@ -1035,6 +1035,92 @@ main {
   color: var(--muted);
 }
 
+/* ---- 変更点の確認のダイアログの、「場所 / いま → 書き込む内容」の表 ---- */
+
+.dialog .changes-scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.dialog .changes {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.dialog .changes th,
+.dialog .changes td {
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.dialog .changes thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: normal;
+}
+
+.dialog .changes tbody th {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dialog .changes td:nth-child(2),
+.dialog .changes-arrow {
+  color: var(--muted);
+}
+
+.dialog .changes td:last-child {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* 連動して変えたキーの組と、読み込んだ設定。見出しの下に、場所を字下げして並べる */
+.dialog .changes-group tr:not(.changes-title) th {
+  padding-left: 1.4rem;
+  font-weight: normal;
+}
+
+.dialog .changes-group tr:not(:last-child) th,
+.dialog .changes-group tr:not(:last-child) td {
+  border-bottom-style: dashed;
+}
+
+.dialog .changes .changes-notes td,
+.dialog .changes .changes-refused td {
+  padding-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: left;
+  white-space: normal;
+}
+
+.dialog .changes .changes-notes span {
+  display: block;
+}
+
+.dialog .changes .changes-refused td {
+  color: var(--danger);
+}
+
+.dialog .changes-empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* 「すべて取り消す」は、ほかのボタンから離して左に置く */
+.dialog .changes-all {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-right: auto;
+}
+
 /* ---- 共有中のキーの確認に出す、同じ枠を指すキーの位置の小さな図 ---- */
 
 .dialog .mini-figures {

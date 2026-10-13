@@ -67,7 +67,8 @@ export const hasUnwrittenChanges = (state: EditState) => !isEmptyEdits(state.edi
 
 /**
  * 編集の数。取り消しの単位で数える: キー、エンコーダーの1方向、コンボが1件ずつ。
- * 連動して変えたキーの組は、まとめて1件。出発点の入れ替え（.vil やバックアップの読み込み）は、全体で1件
+ * 連動して変えたキーの組は、まとめて1件。出発点の入れ替え（.vil やバックアップの読み込み）は、全体で1件。
+ * 変更点の一覧（model/diff.ts の listChanges）の行数と同じ。画面に出す件数は、一覧の行数を使う
  */
 export function countEdits(state: EditState): number {
   const { keys, encoders, combos } = state.edits
@@ -404,6 +405,10 @@ export function replaceSource(state: EditState, source: KeyboardSnapshot): EditS
 /** 出発点の入れ替えを取り消す（出発点を基準に戻す） */
 export const revertSource = (state: EditState): EditState => replaceSource(state, state.baseline)
 
+/** すべての変更を取り消す。編集を捨て、出発点を基準に戻す（本体から読んだ内容に戻る） */
+export const revertAll = (state: EditState): EditState =>
+  hasUnwrittenChanges(state) ? { baseline: state.baseline, source: state.baseline, edits: EMPTY_EDITS } : state
+
 /** 書き込みと照合が通った後。読み直した内容を新しい基準にし、編集を捨てる */
 export const markWritten = (verified: KeyboardSnapshot): EditState => loadSnapshot(verified)
 
@@ -479,6 +484,8 @@ export type SessionAction =
   | { type: 'revert'; place: EditPlace }
   | { type: 'replaceSource'; source: KeyboardSnapshot }
   | { type: 'revertSource' }
+  /** すべての変更を取り消す（編集と、出発点の入れ替え） */
+  | { type: 'revertAll' }
   | { type: 'written'; verified: KeyboardSnapshot }
 
 /**
@@ -529,6 +536,8 @@ function applyToEdit(edit: EditState, action: Exclude<SessionAction, { type: 're
       return replaceSource(edit, action.source)
     case 'revertSource':
       return revertSource(edit)
+    case 'revertAll':
+      return revertAll(edit)
     case 'written':
       return markWritten(action.verified)
   }

@@ -53,13 +53,15 @@ interface Props {
   onAction: (action: SessionAction) => void
   /** 開いているレイヤーと刻印。コンボのタブと同じものを使う時に渡す。省くと、この部品が持つ */
   shown?: LayerView
+  /** 変更点の一覧から取り消した回数。変わったら、共有中のキーの確認への答えを忘れる */
+  reverts?: number
 }
 
 /**
  * キーマップの表示と編集。レイヤーの行（番号、凡例を開く「?」、刻印の切り替え）、選んだレイヤーのキーボード図、
  * 図で選んだキー（か、エンコーダーの1方向）の編集欄
  */
-export function KeymapView({ state, onAction, shown }: Props) {
+export function KeymapView({ state, onAction, shown, reverts = 0 }: Props) {
   const { source: snapshot, edits } = state
   const own = useLayerView()
   const { layer: selectedLayer, legend, setLayer, setLegend } = shown ?? own
@@ -70,7 +72,10 @@ export function KeymapView({ state, onAction, shown }: Props) {
   const [shortage, setShortage] = useState<Shortage | null>(null)
   const [confirm, setConfirm] = useState<SharedConfirm | null>(null)
   // 共有中のキーの確認への答え。そのキーを選んでいる間だけ覚える（欄を1つ変えるたびに、確認を出さないため）
-  const [answer, setAnswer] = useState<SharedAnswer | null>(null)
+  // 変更点の一覧から変更を取り消した時も、忘れる
+  const [held, setHeld] = useState<{ answer: SharedAnswer; reverts: number } | null>(null)
+  const answer = held && held.reverts === reverts ? held.answer : null
+  const setAnswer = (next: SharedAnswer | null) => setHeld(next && { answer: next, reverts })
   const legendId = useId()
   const keys = useMemo(() => placeKeys(snapshot.layout), [snapshot.layout])
   const custom = useMemo(() => customKeycodesOf(snapshot.layout), [snapshot.layout])

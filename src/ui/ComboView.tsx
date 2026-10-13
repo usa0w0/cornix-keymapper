@@ -100,10 +100,13 @@ export function ComboView({ state, onAction, shown, initialDraft, initialShown }
   // 枠が足りない追加と、本体の設定に直せないコンボは、状態に反映する前に止めて、理由を見せる
   const save = () => {
     if (!draft || !content) return
-    const { blocked } = draft.ref ? tryEditCombo(state, draft.ref, content) : tryAddCombo(state, content)
+    // 足したコンボを変えている途中で、変更点の一覧からその追加を取り消した時は、変える相手がないので、足し直す
+    const gone = draft.ref !== null && 'added' in draft.ref && !edits.combos.some((edit) => sameComboRef(edit.ref, draft.ref!))
+    const ref = gone ? null : draft.ref
+    const { blocked } = ref ? tryEditCombo(state, ref, content) : tryAddCombo(state, content)
     if (blocked) return setRefused(blockedReason(blocked, total))
-    setShownRef(draft.ref ?? { added: nextAddedCombo(state) })
-    onAction(draft.ref ? { type: 'editCombo', ref: draft.ref, combo: content } : { type: 'addCombo', combo: content })
+    setShownRef(ref ?? { added: nextAddedCombo(state) })
+    onAction(ref ? { type: 'editCombo', ref, combo: content } : { type: 'addCombo', combo: content })
     stop()
   }
 

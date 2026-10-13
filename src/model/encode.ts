@@ -119,9 +119,9 @@ export const COMBO_KEYS = { min: 2, max: 4 }
 /** 枠の割り当てに使う、本体の設定の部分 */
 export type KeySettings = Pick<KeyboardSnapshot, 'keymap' | 'encoders' | 'combos' | 'tapDances'>
 
-const isEmptyEntry = (entry: TapDanceFields) => FIELDS.every((field) => entry[field] === KC_NO)
+export const isEmptyEntry = (entry: TapDanceFields) => FIELDS.every((field) => entry[field] === KC_NO)
 
-const sameFields = (a: TapDanceFields, b: TapDanceFields) => FIELDS.every((field) => a[field] === b[field])
+export const sameFields = (a: TapDanceFields, b: TapDanceFields) => FIELDS.every((field) => a[field] === b[field])
 
 /** コンボが指しているキーコード。同時に押すキーと、出力 */
 const comboKeycodes = (combos: readonly ComboEntry[]) => combos.flatMap((combo) => [...combo.keys, combo.output])
@@ -130,7 +130,7 @@ const comboKeycodes = (combos: readonly ComboEntry[]) => combos.flatMap((combo) 
  * 使われている枠の番号。キー、エンコーダー、コンボ（同時に押すキーと出力）のどれかから指されている枠。
  * このサイトが解釈できないキーコードとして残っているものも、Tap Dance を指していれば数える
  */
-function pointedSlots({ keymap, encoders, combos }: Omit<KeySettings, 'tapDances'>): Set<number> {
+export function pointedSlots({ keymap, encoders, combos }: Omit<KeySettings, 'tapDances'>): Set<number> {
   const pointed = new Set<number>()
   for (const keycode of [...keymap.flat(), ...encoders.flat(2), ...comboKeycodes(combos)]) {
     const index = tapDanceIndexOf(keycode)
@@ -173,7 +173,7 @@ export function tapDanceUses({ keymap, encoders, combos, tapDances }: KeySetting
 
 const emptyCombo = (): ComboEntry => ({ keys: [KC_NO, KC_NO, KC_NO, KC_NO], output: KC_NO })
 
-const isEmptyCombo = (combo: ComboEntry) => combo.output === KC_NO && combo.keys.every((key) => key === KC_NO)
+export const isEmptyCombo = (combo: ComboEntry) => combo.output === KC_NO && combo.keys.every((key) => key === KC_NO)
 
 /** 空いているコンボの枠（キーも出力も入っていない枠）の数。ヘッダーの残り枠数 */
 export const countFreeCombos = (combos: readonly ComboEntry[]) => combos.filter(isEmptyCombo).length

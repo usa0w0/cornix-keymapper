@@ -41,6 +41,7 @@ const header = (connection: ConnectionState, options: { supported?: boolean; rea
       supported={options.supported ?? true}
       slots={options.read ? slotCounts(report.snapshot) : null}
       changes={options.changes ?? 0}
+      onWrite={options.changes ? () => {} : null}
       onConnect={() => {}}
       onDisconnect={() => {}}
       onDeviceInfo={options.read && connection.status === 'connected' ? () => {} : null}
@@ -290,16 +291,19 @@ test('診断で読み直した結果は、その機器の読み出しが終わ�
   expect(replaceReport(store.get(), fake, reread)).toMatchObject({ device: fake, run: 1, state: { status: 'done', report: reread } })
 })
 
-test('ヘッダーの「書き込み」に、編集の数を出す。押せないまま', () => {
+test('ヘッダーの「書き込み」に、変更の件数を出す。変更がある時だけ押せる', () => {
   const html = header({ status: 'connected', device }, { read: true, changes: 3 })
-  expect(html).toContain('<button type="button" class="primary" disabled="" title="準備中">書き込み（変更 3 件）</button>')
+  expect(html).toContain('<button type="button" class="primary" title="変更点を確かめる">書き込み（変更 3 件）</button>')
+  const none = header({ status: 'connected', device }, { read: true })
+  expect(none).toContain('<button type="button" class="primary" disabled="" title="変更はありません">書き込み（変更 0 件）</button>')
 })
 
 test('接続が切れた後のヘッダー: 残り枠数とボタンは出したまま、「未接続」と「接続」にする', () => {
   const html = header({ status: 'disconnected', lostAfterMs: 1000 }, { read: true, changes: 1 })
   expect(html).toContain('未接続</span><button type="button">接続</button>')
   expect(html).toContain('Tap Dance 残り <b>30</b> / 32')
-  expect(html).toContain('書き込み（変更 1 件）')
+  // 接続が切れている間も、変更点の一覧を開いて、取り消せる
+  expect(html).toContain('<button type="button" class="primary" title="変更点を確かめる">書き込み（変更 1 件）</button>')
   expect(html).not.toContain('▾')
 })
 
@@ -310,6 +314,7 @@ test('つなぎ直して読み直している間のヘッダー: 読み終える
       supported
       slots={slotCounts(report.snapshot)}
       changes={1}
+      onWrite={() => {}}
       onConnect={() => {}}
       onDisconnect={() => {}}
       onDeviceInfo={null}

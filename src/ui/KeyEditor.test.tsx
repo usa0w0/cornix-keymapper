@@ -235,6 +235,7 @@ test('ヘッダーの Tap Dance の残り枠数は、編集に合わせて増減
       supported
       slots={editSlotCounts(state)}
       changes={2}
+      onWrite={() => {}}
       onConnect={() => {}}
       onDisconnect={() => {}}
       onDeviceInfo={null}

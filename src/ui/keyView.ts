@@ -14,8 +14,11 @@ import {
 import { decodeKey } from '../model/decode.ts'
 import { EMPTY_EDITS, type Edits } from '../model/edits.ts'
 import { customKeycodesOf, keycodeToAction, type CustomKeycode } from '../model/keycodes.ts'
-import type { Bounds, PlacedKey } from '../model/layout.ts'
+import { encoderName, type Bounds, type PlacedKey } from '../model/layout.ts'
 import { firstBelow } from '../model/transparent.ts'
+
+// 場所の名前は、変更点の一覧（model/diff.ts）も使うので、model/layout.ts に置いてある
+export { encoderName, placeName } from '../model/layout.ts'
 
 /** 図の上の場所1つ。キーか、エンコーダーの1方向 */
 export type KeyTarget =
@@ -151,14 +154,6 @@ export function isLong(text: string): boolean {
   for (const char of text) width += char.charCodeAt(0) > 0xff ? 2 : 1
   return width > 5
 }
-
-/** キーの場所の名前。編集欄と、枠を使っているキーの一覧に出す */
-export const placeName = (layer: number, key: { row: number; col: number }) =>
-  `レイヤー ${layer} ・ 行 ${key.row} 列 ${key.col}`
-
-/** エンコーダーの1方向の名前 */
-export const encoderName = (turn: { encoder: number; direction: 'left' | 'right' }) =>
-  `エンコーダー ${turn.encoder + 1} の${turn.direction === 'left' ? '左回し' : '右回し'}`
 
 /** 図の上の場所の名前。読み上げと、マウスを載せた時の説明に使う */
 export function targetName(key: PlacedKey): string {
