@@ -4,11 +4,20 @@
 import type { Action } from './action.ts'
 import type { KeyBehavior } from './behavior.ts'
 
-/** キー1つの編集。key はキーマップの中の番号（行 × 列数 + 列） */
-export interface KeyEdit {
+/** キーの場所。key はキーマップの中の番号（行 × 列数 + 列） */
+export interface KeyPlace {
   layer: number
   key: number
+}
+
+/** キー1つの編集 */
+export interface KeyEdit extends KeyPlace {
   behavior: KeyBehavior
+  /**
+   * 連動して変えたキーの組の番号。同じ枠を共有していたキーを「n つとも変更」で一緒に変えた時に、同じ番号を入れる。
+   * 同じ番号のキーは、まとめて1件として数え、まとめて取り消す。1つだけで変えたキーにはない
+   */
+  link?: number
 }
 
 /** エンコーダーの1方向の編集 */
@@ -59,6 +68,23 @@ export const EMPTY_EDITS: Edits = { keys: [], encoders: [], combos: [] }
 
 export const isEmptyEdits = (edits: Edits) =>
   edits.keys.length === 0 && edits.encoders.length === 0 && edits.combos.length === 0
+
+/** 取り消しの単位で数えた、キーの編集の数。連動して変えたキーの組は、まとめて1件 */
+export const countKeyEdits = (keys: readonly KeyEdit[]) =>
+  keys.filter((edit) => edit.link === undefined).length + new Set(keys.flatMap((edit) => edit.link ?? [])).size
+
+/**
+ * そのキーと一緒に取り消されるキー（そのキー自身を含む。レイヤー、キーの番号の順）。
+ * 連動して変えたキーなら、同じ組のキーすべて。編集していないキーなら空
+ */
+export function linkedKeys(keys: readonly KeyEdit[], place: KeyPlace): KeyPlace[] {
+  const edit = keys.find((item) => item.layer === place.layer && item.key === place.key)
+  if (!edit) return []
+  return keys
+    .filter((item) => item === edit || (edit.link !== undefined && item.link === edit.link))
+    .map(({ layer, key }) => ({ layer, key }))
+    .sort((a, b) => a.layer - b.layer || a.key - b.key)
+}
 
 export const sameComboRef = (a: ComboRef, b: ComboRef) =>
   'slot' in a ? 'slot' in b && a.slot === b.slot : 'added' in b && a.added === b.added

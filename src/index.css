@@ -913,3 +913,55 @@ main {
   margin-left: 0.3rem;
   color: var(--muted);
 }
+
+/* ---- 共有中のキーの確認に出す、同じ枠を指すキーの位置の小さな図 ---- */
+
+.dialog .mini-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem 1.4rem;
+  margin: 0.6rem 0 0.9rem;
+}
+
+.dialog .mini-figure {
+  margin: 0;
+}
+
+.dialog .mini-figure figcaption {
+  margin-bottom: 0.3rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.dialog .mini-board {
+  position: relative;
+}
+
+.dialog .mini-key {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--key);
+}
+
+.dialog .mini-key.encoder {
+  border-radius: 50%;
+}
+
+.dialog .mini-key.shared {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.dialog .mini-key.current {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--accent);
+  z-index: 1;
+}
+
+.dialog .mini-note {
+  color: var(--muted);
+  font-size: 0.85rem;
+}

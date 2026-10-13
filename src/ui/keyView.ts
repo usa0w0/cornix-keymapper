@@ -1,4 +1,5 @@
 // キーボード図に出す、キー1つぶんの見え方を、本体から読んだ設定と、利用者の編集から作る
+import type { CSSProperties } from 'react'
 import type { KeyboardSnapshot } from '../device/types.ts'
 import { labelOf, type ActionLabel, type Legend } from '../model/action.ts'
 import {
@@ -13,7 +14,7 @@ import {
 import { decodeKey } from '../model/decode.ts'
 import { EMPTY_EDITS, type Edits } from '../model/edits.ts'
 import { customKeycodesOf, keycodeToAction, type CustomKeycode } from '../model/keycodes.ts'
-import type { PlacedKey } from '../model/layout.ts'
+import type { Bounds, PlacedKey } from '../model/layout.ts'
 import { firstBelow } from '../model/transparent.ts'
 
 /** 図の上の場所1つ。キーか、エンコーダーの1方向 */
@@ -151,4 +152,19 @@ export const placeName = (layer: number, key: { row: number; col: number }) =>
 export function targetName(key: PlacedKey): string {
   if (key.kind === 'encoder') return `エンコーダー ${key.encoder + 1} の${key.direction === 'left' ? '左回し' : '右回し'}`
   return `行 ${key.row}・列 ${key.col} のキー`
+}
+
+/**
+ * 図の中での、キーの置き場所。unit はキー1つぶんの大きさ、gap はキーどうしのすき間（px）。
+ * 渡すと、その大きさの図にする（共有中のキーの確認に出す、小さな図）
+ */
+export function placeOf(key: PlacedKey, box: Bounds, unit = 64, gap = 4): CSSProperties {
+  return {
+    left: (key.x - box.minX) * unit,
+    top: (key.y - box.minY) * unit,
+    width: key.w * unit - gap,
+    height: key.h * unit - gap,
+    transform: key.r ? `rotate(${key.r}deg)` : undefined,
+    transformOrigin: `${(key.rx - key.x) * unit}px ${(key.ry - key.y) * unit}px`,
+  }
 }

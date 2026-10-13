@@ -5,15 +5,19 @@ import type { ComboEntry, KeyboardSnapshot } from '../device/types.ts'
 import type { Action } from '../model/action.ts'
 import type { KeyBehavior } from '../model/behavior.ts'
 import { decodeKey } from '../model/decode.ts'
-import { applyEdits as encodeEdits, planKeyEdits, type KeyEditPlan } from '../model/encode.ts'
+import { applyEdits as encodeEdits, planKeyEdits, tapDanceUses, type KeyEditPlan } from '../model/encode.ts'
 import {
+  countKeyEdits,
   EMPTY_EDITS,
   isEmptyEdits,
+  linkedKeys,
   sameComboRef,
   type ComboContent,
   type ComboRef,
   type EditPlace,
   type Edits,
+  type KeyEdit,
+  type KeyPlace,
 } from '../model/edits.ts'
 import { customKeycodesOf, keycodeToAction, type CustomKeycode } from '../model/keycodes.ts'
 
@@ -54,11 +58,11 @@ export const hasUnwrittenChanges = (state: EditState) => !isEmptyEdits(state.edi
 
 /**
  * 編集の数。取り消しの単位で数える: キー、エンコーダーの1方向、コンボが1件ずつ。
- * 出発点の入れ替え（.vil やバックアップの読み込み）は、全体で1件
+ * 連動して変えたキーの組は、まとめて1件。出発点の入れ替え（.vil やバックアップの読み込み）は、全体で1件
  */
 export function countEdits(state: EditState): number {
   const { keys, encoders, combos } = state.edits
-  return keys.length + encoders.length + combos.length + (isSourceReplaced(state) ? 1 : 0)
+  return countKeyEdits(keys) + encoders.length + combos.length + (isSourceReplaced(state) ? 1 : 0)
 }
 
 /** 出発点の枠にあるコンボ。空の枠は null。本体にない枠は undefined */
@@ -114,8 +118,11 @@ const withEdits = (state: EditState, edits: Edits): EditState => {
   return sameValue(pruned, state.edits) ? state : { ...state, edits: pruned }
 }
 
+const samePlace = (a: KeyPlace, b: KeyPlace) => a.layer === b.layer && a.key === b.key
+
 /**
  * キーの動作を変える。同じキーの前の編集は置き換える。出発点と同じ内容なら、編集はなくなる。
+ * 連動して変えたキーの組に入っていたキーは、組から外れる（このキーだけの編集になる）。
  * overwriteUnused は、Tap Dance の枠が足りない時に、中身はあるがどこからも使われていない枠を上書きして使ってよいか
  * （利用者が認めた時だけ true。1回認めたら、キーの編集がなくなるまで続く）
  */
@@ -126,9 +133,48 @@ export function editKey(
   behavior: KeyBehavior,
   overwriteUnused = false,
 ): EditState {
-  const others = state.edits.keys.filter((edit) => edit.layer !== layer || edit.key !== key)
-  const keys = [...others, { layer, key, behavior }]
+  return withKeys(state, [{ layer, key, behavior }], overwriteUnused)
+}
+
+/** キーの編集を足す。同じ場所の前の編集は置き換える */
+function withKeys(state: EditState, added: KeyEdit[], overwriteUnused: boolean): EditState {
+  const others = state.edits.keys.filter((edit) => !added.some((place) => samePlace(place, edit)))
+  const keys = [...others, ...added]
   return withEdits(state, overwriteUnused ? { ...state.edits, keys, overwriteUnusedTapDances: true } : { ...state.edits, keys })
+}
+
+/**
+ * 複数のキーを、連動して同じ動作に変える（共有中のキーの「n つとも変更」）。
+ * まとめて1件の編集として数え、まとめて取り消せるように、同じ組の番号を付ける。
+ * 出発点と同じ内容になったキーは、編集として残らない
+ */
+export function editKeysTogether(
+  state: EditState,
+  places: readonly KeyPlace[],
+  behavior: KeyBehavior,
+  overwriteUnused = false,
+): EditState {
+  if (places.length < 2) return places.length === 0 ? state : editKey(state, places[0].layer, places[0].key, behavior, overwriteUnused)
+  // 組の番号は、ほかのキーが使っていない、いちばん小さいもの（同じ組をもう一度変えた時に、同じ番号になる）
+  const used = new Set(state.edits.keys.filter((edit) => !places.some((place) => samePlace(place, edit))).map((edit) => edit.link))
+  let link = 0
+  while (used.has(link)) link++
+  return withKeys(state, places.map(({ layer, key }) => ({ layer, key, behavior, link })), overwriteUnused)
+}
+
+/**
+ * そのキーと同じ Tap Dance の枠を指しているキー（編集を当てはめた後の内容で見る。そのキー自身を含み、レイヤー、キーの番号の順）。
+ * 共有は「同じ枠を指している」ことで決まる。枠を使わないキー（MT、LT など）と、ほかに同じ枠を指すキーがないキーは、空。
+ * 出発点で同じ枠を指しているキーも、この画面の編集で同じ内容になって同じ枠を使うことになったキーも含む。
+ * 枠を割り当てられていないキー（枠が足りない時）は、枠を指していないので、含めない
+ */
+export function sharedKeys(state: EditState, place: KeyPlace): KeyPlace[] {
+  const plan = planKeys(state)
+  const placed = (key: KeyPlace) => ![...plan.unplaced, ...plan.invalid].some((edit) => samePlace(edit, key))
+  if (!placed(place)) return []
+  const uses = tapDanceUses({ ...state.source, keymap: plan.keymap, tapDances: plan.tapDances })
+  const keys = uses.find((use) => use.keys.some((key) => samePlace(key, place)))?.keys.filter(placed) ?? []
+  return keys.length > 1 ? keys : []
 }
 
 /** キーの編集を出発点に当てはめた結果（キーコードと Tap Dance の枠の割り当て、残り枠数、足りない枠の数） */
@@ -157,6 +203,14 @@ function guard(state: EditState, next: EditState): KeyEditResult {
 /** キーの動作を変える。Tap Dance の枠が足りなくなる編集は、状態に反映せずに止める */
 export const tryEditKey = (state: EditState, layer: number, key: number, behavior: KeyBehavior, overwriteUnused = false) =>
   guard(state, editKey(state, layer, key, behavior, overwriteUnused))
+
+/** 複数のキーを、連動して同じ動作に変える。Tap Dance の枠が足りなくなる編集は、状態に反映せずに止める */
+export const tryEditKeysTogether = (
+  state: EditState,
+  places: readonly KeyPlace[],
+  behavior: KeyBehavior,
+  overwriteUnused = false,
+) => guard(state, editKeysTogether(state, places, behavior, overwriteUnused))
 
 /**
  * その場所の編集を取り消す。取り消すと Tap Dance の枠が足りなくなる時は、止める
@@ -195,15 +249,14 @@ export function editCombo(state: EditState, ref: ComboRef, combo: ComboContent |
   return withEdits(state, { ...state.edits, combos })
 }
 
-/** その場所の編集を取り消す（出発点の内容に戻る） */
+/** その場所の編集を取り消す（出発点の内容に戻る）。連動して変えたキーは、同じ組のキーをまとめて取り消す */
 export function revertEdit(state: EditState, place: EditPlace): EditState {
   const { keys, encoders, combos } = state.edits
   switch (place.kind) {
-    case 'key':
-      return withEdits(state, {
-        ...state.edits,
-        keys: keys.filter((edit) => edit.layer !== place.layer || edit.key !== place.key),
-      })
+    case 'key': {
+      const reverted = linkedKeys(keys, place)
+      return withEdits(state, { ...state.edits, keys: keys.filter((edit) => !reverted.some((key) => samePlace(key, edit))) })
+    }
     case 'encoder':
       return withEdits(state, {
         ...state.edits,
@@ -291,6 +344,8 @@ export type SessionAction =
   | { type: 'resolve'; choice: ReloadChoice }
   /** キーの動作を変える。Tap Dance の枠が足りなくなる編集は、反映しない（tryEditKey） */
   | { type: 'editKey'; layer: number; key: number; behavior: KeyBehavior; overwriteUnused?: boolean }
+  /** 共有中のキーを、連動して同じ動作に変える。枠が足りなくなる編集は、反映しない（tryEditKeysTogether） */
+  | { type: 'editKeysTogether'; keys: KeyPlace[]; behavior: KeyBehavior; overwriteUnused?: boolean }
   | { type: 'editEncoder'; layer: number; encoder: number; direction: 'left' | 'right'; action: Action }
   | { type: 'addCombo'; combo: ComboContent }
   | { type: 'editCombo'; ref: ComboRef; combo: ComboContent | null }
@@ -334,6 +389,8 @@ function applyToEdit(edit: EditState, action: Exclude<SessionAction, { type: 're
   switch (action.type) {
     case 'editKey':
       return tryEditKey(edit, action.layer, action.key, action.behavior, action.overwriteUnused).state
+    case 'editKeysTogether':
+      return tryEditKeysTogether(edit, action.keys, action.behavior, action.overwriteUnused).state
     case 'editEncoder':
       return editEncoder(edit, action.layer, action.encoder, action.direction, action.action)
     case 'addCombo':

@@ -21,6 +21,8 @@ interface Props {
   view: KeyView
   /** 利用者が変えたキーか */
   changed: boolean
+  /** 連動して変えたキーの数（このキーを含む）。2 以上なら、「変更を取り消す」で、その数のキーがまとめて戻る */
+  linked?: number
   legend: Legend
   /** 本体のレイヤー数と、選べるレイヤー切り替えの方式。動作を選ぶ部品に渡す */
   layerCount: number
@@ -36,7 +38,7 @@ interface Props {
  * 4つとも空のキーは何もしないキーで、その時だけ「透過」のスイッチを出す
  */
 export function KeyEditor(props: Props) {
-  const { layer, place, behavior, view, changed, legend, layerCount, layerModes, onChange, onRevert } = props
+  const { layer, place, behavior, view, changed, linked = 1, legend, layerCount, layerModes, onChange, onRevert } = props
   const [active, setActive] = useState<BehaviorSlot>('tap')
   const locked = view.state === 'locked'
   const empty = view.state === 'none' || view.state === 'transparent'
@@ -54,7 +56,7 @@ export function KeyEditor(props: Props) {
         <h2>{placeName(layer, place)} のキー</h2>
         {changed && (
           <button type="button" onClick={onRevert}>
-            変更を取り消す
+            {linked > 1 ? `変更を取り消す（連動して変えた ${linked} つとも）` : '変更を取り消す'}
           </button>
         )}
       </div>
