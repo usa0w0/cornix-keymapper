@@ -42,6 +42,11 @@ export interface Edits {
   keys: KeyEdit[]
   encoders: EncoderEdit[]
   combos: ComboEdit[]
+  /**
+   * Tap Dance の枠が足りない時に、中身はあるがどこからも使われていない枠を、上書きして使ってよいか。
+   * 利用者が、枠が足りない時の確認で認めた時だけ入る。キーの編集がなくなったら、なくなる
+   */
+  overwriteUnusedTapDances?: boolean
 }
 
 /** 編集の場所。取り消す時に使う */

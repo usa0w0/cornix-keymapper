@@ -2,7 +2,9 @@ import { expect, test } from 'vitest'
 import type { KeyboardSnapshot } from '../device/types.ts'
 import recorded from '../device/fixtures/cornix/usb.json'
 import { placeKeys } from '../model/layout.ts'
-import { isLayerEmpty, isLong, keycodeAt, keyViewOf, slotsName, type KeyTarget } from './keyView.ts'
+import type { Action } from '../model/action.ts'
+import type { Edits } from '../model/edits.ts'
+import { behaviorAt, isChanged, isLayerEmpty, isLong, keycodeAt, keyViewOf, placeName, slotsName, type KeyTarget } from './keyView.ts'
 
 // 実機（Cornix LP）から読んだ設定。JSON の型では、エンコーダーとコンボのキーが、決まった長さの組にならない
 const cornix = recorded.snapshot as unknown as KeyboardSnapshot
@@ -207,4 +209,62 @@ test('大きな字で収まらない表示を見分ける。全角の字は2つ�
   expect(isLong('Ctrl+C')).toBe(true)
   expect(isLong('変換')).toBe(false)
   expect(isLong('無変換')).toBe(true)
+})
+
+// ---- 編集を当てはめた後の見え方 ----
+
+const A: Action = { kind: 'key', code: 0x04, mods: [] }
+const CTRL: Action = { kind: 'key', mods: [{ kind: 'ctrl', side: 'left' }] }
+const keyEdits = (...keys: Edits['keys']): Edits => ({ keys, encoders: [], combos: [] })
+
+test('編集したキーは、編集した後の内容を出す。編集していないキーと、ほかのレイヤーの同じ場所は、出発点のまま', () => {
+  const edits = keyEdits({ layer: 0, key: 1, behavior: { tap: A, hold: CTRL } })
+  expect(keyViewOf(cornix, 0, key(1), 'us', undefined, edits).slots).toEqual({
+    tap: { short: 'A', full: 'A' },
+    hold: { short: 'Ctrl', full: '左 Ctrl' },
+  })
+  expect(isChanged(edits, 0, key(1))).toBe(true)
+  expect(keyViewOf(cornix, 0, key(2), 'us', undefined, edits)).toEqual(keyViewOf(cornix, 0, key(2), 'us'))
+  expect(isChanged(edits, 0, key(2))).toBe(false)
+  expect(keyViewOf(cornix, 1, key(1), 'us', undefined, edits)).toEqual(keyViewOf(cornix, 1, key(1), 'us'))
+  expect(isChanged(edits, 1, key(1))).toBe(false)
+  // エンコーダーは、まだ編集できない
+  expect(isChanged(edits, 0, { kind: 'encoder', encoder: 0, direction: 'left' })).toBe(false)
+  expect(behaviorAt(cornix, 0, key(1), undefined, edits)).toEqual({ tap: A, hold: CTRL })
+  expect(behaviorAt(cornix, 0, key(999), undefined, edits)).toBeUndefined()
+})
+
+test('透過キーは、編集を当てはめた後の、下のレイヤーの動作を出す', () => {
+  // 3枚とも、キー 0 は レイヤー 0 から順に B、透過、透過
+  const snapshot = tiny([[0x0005, 0, 0, 0], [0x0001, 0, 0, 0], [0x0001, 0, 0, 0]])
+  expect(keyViewOf(snapshot, 2, key(0), 'us').inherited).toMatchObject({ layer: 0, slots: { tap: { short: 'B' } } })
+  // レイヤー 0 を変えると、上の透過キーに出る動作も変わる
+  const below = keyEdits({ layer: 0, key: 0, behavior: { tap: A, hold: CTRL } })
+  expect(keyViewOf(snapshot, 2, key(0), 'us', undefined, below).inherited).toMatchObject({
+    layer: 0,
+    slots: { tap: { short: 'A' }, hold: { short: 'Ctrl' } },
+  })
+  // 途中のレイヤーを透過でなくすと、そこで止まる
+  const middle = keyEdits({ layer: 1, key: 0, behavior: { tap: { kind: 'none' } } })
+  expect(keyViewOf(snapshot, 2, key(0), 'us', undefined, middle).inherited).toMatchObject({ layer: 1, state: 'none' })
+  // キーを透過にすると、下のレイヤーの動作を出す。透過でなくすと、出さない
+  const made = keyEdits({ layer: 0, key: 1, behavior: { tap: A } }, { layer: 1, key: 1, behavior: { tap: { kind: 'transparent' } } })
+  expect(keyViewOf(snapshot, 1, key(1), 'us', undefined, made)).toMatchObject({
+    state: 'transparent',
+    inherited: { layer: 0, slots: { tap: { short: 'A' } } },
+  })
+  const unmade = keyEdits({ layer: 2, key: 0, behavior: { tap: A } })
+  expect(keyViewOf(snapshot, 2, key(0), 'us', undefined, unmade)).toEqual({ state: 'normal', slots: { tap: { short: 'A', full: 'A' } } })
+})
+
+test('キーが1つも割り当てられていないレイヤーかは、編集を当てはめた後の内容で見る', () => {
+  const snapshot = tiny([[0x0004, 0, 0, 0], [0x0001, 0, 0, 0]])
+  const keys = placeKeys(snapshot.layout)
+  expect(isLayerEmpty(snapshot, 1, keys)).toBe(true)
+  expect(isLayerEmpty(snapshot, 1, keys, keyEdits({ layer: 1, key: 3, behavior: { tap: A } }))).toBe(false)
+  expect(isLayerEmpty(snapshot, 0, keys, keyEdits({ layer: 0, key: 0, behavior: { tap: { kind: 'none' } } }))).toBe(true)
+})
+
+test('キーの場所の名前', () => {
+  expect(placeName(0, { row: 3, col: 5 })).toBe('レイヤー 0 ・ 行 3 列 5')
 })

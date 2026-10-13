@@ -120,19 +120,6 @@ main {
   color: #1f2328;
 }
 
-/* 確認用の仮の入口（?fake&debugEdit）。編集欄（#10）ができたら消す */
-.debug-panel {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.6rem;
-  margin: 0;
-  padding: 0.3rem 1rem;
-  border-bottom: 1px dashed var(--line);
-  color: var(--muted);
-  font-size: 0.8rem;
-}
-
 .dialog p {
   margin: 0 0 0.7rem;
 }
@@ -356,8 +343,7 @@ main {
 
 .app button,
 .keymap button,
-.picker button,
-.picker-preview button {
+.picker button {
   font: inherit;
   color: inherit;
   padding: 0.35rem 0.75rem;
@@ -453,6 +439,18 @@ main {
   line-height: 1.15;
 }
 
+.keymap .key.changed {
+  border-color: var(--changed);
+}
+
+.keymap .key[aria-pressed='true'],
+.keymap .key.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent);
+  z-index: 1;
+}
+
 .keymap .key.state-none {
   background: var(--key-none);
   box-shadow: none;
@@ -519,12 +517,22 @@ main {
 }
 
 .keymap .mark-locked,
-.keymap .mark-transparent {
+.keymap .mark-transparent,
+.keymap .mark-changed {
   position: absolute;
   top: 2px;
   right: 3px;
   font-size: 8.5px;
   color: var(--muted);
+}
+
+.keymap .mark-changed {
+  top: auto;
+  bottom: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--changed);
 }
 
 .keymap .key.encoder {
@@ -670,8 +678,7 @@ main {
   border-radius: 999px;
 }
 
-.picker button[aria-pressed='true'],
-.picker-preview button[aria-pressed='true'] {
+.picker button[aria-pressed='true'] {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent);
@@ -736,23 +743,173 @@ main {
   font-size: 9px;
 }
 
-/* ---- 動作を選ぶ部品だけの見本（?picker）。編集欄（#10）につないだら消す ---- */
+/* ---- 編集欄（図の下） ---- */
 
-.picker-preview {
-  font-size: 14px;
-  line-height: 1.4;
+.keymap .notice-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 0.6rem;
 }
 
-.picker-preview-panel {
-  margin-top: 1rem;
+.keymap .edit {
   padding: 0.8rem 1rem;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface);
 }
 
-.picker-preview-panel .picker {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: none;
+.keymap .edit-head {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 0.7rem;
+}
+
+.keymap .edit-head h2 {
+  margin: 0 auto 0 0;
+  font-size: 0.95rem;
+}
+
+.keymap .edit-head .key {
+  position: relative;
+  flex: none;
+  width: 60px;
+  height: 60px;
+}
+
+.keymap .edit-empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+.keymap .edit-note {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 0 0 0.6rem;
+  color: var(--muted);
+}
+
+.keymap button.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.2rem 0.3rem;
+  border: none;
+  background: none;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.keymap .switch-track {
+  position: relative;
+  width: 2.2rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background 0.15s;
+}
+
+.keymap .switch-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(1.25rem - 4px);
+  height: calc(1.25rem - 4px);
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+
+.keymap .switch[aria-checked='true'] .switch-track {
+  background: var(--accent);
+}
+
+.keymap .switch[aria-checked='true'] .switch-track::after {
+  transform: translateX(0.95rem);
+}
+
+.keymap .fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.keymap .field-name {
+  display: block;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.keymap .field-box {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.keymap .field-box.unset {
+  border-style: dashed;
+}
+
+.keymap .field-box.active {
+  border-color: var(--accent);
+  border-style: solid;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.keymap .field-box button {
+  border: none;
+  border-radius: 0;
+  background: none;
+}
+
+.keymap .field-box .field-value {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.keymap .field-box.unset .field-value {
+  color: var(--muted);
+}
+
+.keymap .field-box .field-clear {
+  padding: 0 0.7rem;
+  border-left: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.keymap .field-box .field-clear:hover {
+  background: var(--key-none);
+  color: var(--text);
+}
+
+/* ---- 枠が足りない時のダイアログの、枠を使っているキーの一覧 ---- */
+
+.dialog .plain-list {
+  max-height: 40vh;
+  margin: 0.4rem 0 0.8rem;
+  padding-left: 1.2rem;
+  overflow-y: auto;
+  line-height: 1.9;
+}
+
+.dialog .plain-list li {
+  margin-bottom: 0.3rem;
+}
+
+.dialog .plain-list button {
+  margin-right: 0.4rem;
+  padding: 0.1rem 0.6rem;
+}
+
+.dialog .plain-list-note {
+  margin-left: 0.3rem;
+  color: var(--muted);
 }

@@ -13,9 +13,6 @@ import { SessionBanner } from './SessionBanner.tsx'
 import { ConnectStage, ReadFailedStage, ReadingStage } from './Stage.tsx'
 import { describeError, disconnectedNotice, formatDuration, type ConnectionState } from './useConnection.ts'
 import { readReportFrom, readStateFor, replaceReport, runRead, type HeldRead, type ReadState } from './useDeviceRead.ts'
-import { EMPTY_SESSION, sessionReducer } from '../session/editState.ts'
-import { DebugEditPanel } from './DebugEditPanel.tsx'
-import { EditSessionContext } from './editContext.ts'
 
 const device: KeyboardDevice = {
   name: 'Cornix',
@@ -389,19 +386,4 @@ test('別の機器だった時のダイアログ: 編集を捨てる前に確認
   expect(html).toContain('編集した内容（1 件）は、前のキーボードのものなので、このキーボードには使えません。')
   expect(html).toContain('<button type="button">やめる</button><button type="button" class="primary">編集を捨てて、このキーボードを読み込む</button></div>')
   expect(html).not.toContain('当て直して続ける')
-})
-
-test('仮の入口（?fake&debugEdit）は、偽の機器への操作を渡した時だけ、読み出した後に出す', () => {
-  const tools = { loseConnection: () => {}, alterDevice: () => {}, switchDevice: () => {} }
-  // 読み出す前は出さない
-  expect(renderToStaticMarkup(<App connector={createFakeCornix()} supported debug={tools} />)).not.toContain('debug-panel')
-  const session = sessionReducer(EMPTY_SESSION, { type: 'read', snapshot: cornixSnapshot() })
-  const html = renderToStaticMarkup(
-    <EditSessionContext value={{ session, dispatch: () => {} }}>
-      <DebugEditPanel tools={tools} />
-    </EditSessionContext>,
-  )
-  for (const name of ['編集を1件足す', '偽の機器の接続を切る', '偽の機器の中身を書き換える', '偽の機器を別の機器にする']) {
-    expect(html).toContain(`${name}</button>`)
-  }
 })

@@ -1,4 +1,4 @@
-// キーボード図に出す、キー1つぶんの見え方を、本体から読んだ設定から作る
+// キーボード図に出す、キー1つぶんの見え方を、本体から読んだ設定と、利用者の編集から作る
 import type { KeyboardSnapshot } from '../device/types.ts'
 import { labelOf, type ActionLabel, type Legend } from '../model/action.ts'
 import {
@@ -11,9 +11,10 @@ import {
   type KeyBehavior,
 } from '../model/behavior.ts'
 import { decodeKey } from '../model/decode.ts'
+import { EMPTY_EDITS, type Edits } from '../model/edits.ts'
 import { customKeycodesOf, keycodeToAction, type CustomKeycode } from '../model/keycodes.ts'
 import type { PlacedKey } from '../model/layout.ts'
-import { effectiveBelow } from '../model/transparent.ts'
+import { firstBelow } from '../model/transparent.ts'
 
 /** 図の上の場所1つ。キーか、エンコーダーの1方向 */
 export type KeyTarget =
@@ -62,30 +63,49 @@ export function behaviorView(behavior: KeyBehavior, legend: Legend): { state: Ke
   return { state, slots }
 }
 
+/** その場所の編集。編集していなければ undefined。編集できるのは、キーだけ（エンコーダーは #12） */
+const keyEditAt = (edits: Edits, layer: number, target: KeyTarget) =>
+  target.kind === 'key' ? edits.keys.find((edit) => edit.layer === layer && edit.key === target.index) : undefined
+
+/** その場所を、利用者が変えているか */
+export const isChanged = (edits: Edits, layer: number, target: KeyTarget) => keyEditAt(edits, layer, target) !== undefined
+
 /**
- * その場所の、キーコード1つの見え方。キーは4欄に展開する（MT、LT、Tap Dance は、タップと長押しなどに分かれる）。
+ * その場所の、編集を当てはめた後の動作。本体から読んだ設定にない場所は undefined。
+ * キーは4欄に展開する（MT、LT、Tap Dance は、タップと長押しなどに分かれる）。
  * エンコーダーは動作1つなので、展開せずに、その動作をタップ欄に入れて出す
  */
-function describe(snapshot: KeyboardSnapshot, target: KeyTarget, keycode: number, custom: readonly CustomKeycode[], legend: Legend) {
-  const behavior =
-    target.kind === 'key' ? decodeKey(keycode, snapshot.tapDances, custom) : { tap: keycodeToAction(keycode, custom) }
-  return behaviorView(behavior, legend)
+export function behaviorAt(
+  snapshot: KeyboardSnapshot,
+  layer: number,
+  target: KeyTarget,
+  custom: readonly CustomKeycode[] = customKeycodesOf(snapshot.layout),
+  edits: Edits = EMPTY_EDITS,
+): KeyBehavior | undefined {
+  const keycode = keycodeAt(snapshot, layer, target)
+  if (keycode === undefined) return undefined
+  const edit = keyEditAt(edits, layer, target)
+  if (edit) return edit.behavior
+  return target.kind === 'key' ? decodeKey(keycode, snapshot.tapDances, custom) : { tap: keycodeToAction(keycode, custom) }
 }
 
-/** その場所の見え方。透過キーには、下のレイヤーで実際に効く動作（展開した後の4欄）を添える */
+/**
+ * その場所の見え方。edits を渡すと、編集を当てはめた後の内容を出す。
+ * 透過キーには、下のレイヤーで実際に効く動作（編集を当てはめた後の4欄）を添える
+ */
 export function keyViewOf(
   snapshot: KeyboardSnapshot,
   layer: number,
   target: KeyTarget,
   legend: Legend,
   custom: readonly CustomKeycode[] = customKeycodesOf(snapshot.layout),
+  edits: Edits = EMPTY_EDITS,
 ): KeyView {
-  const view = describe(snapshot, target, keycodeAt(snapshot, layer, target) ?? 0, custom, legend)
+  const at = (where: number) => behaviorAt(snapshot, where, target, custom, edits)
+  const view = behaviorView(at(layer) ?? { tap: { kind: 'none' } }, legend)
   if (view.state !== 'transparent') return view
-  const below = effectiveBelow(layer, (lower) => keycodeAt(snapshot, lower, target))
-  return below
-    ? { ...view, inherited: { layer: below.layer, ...describe(snapshot, target, below.keycode, custom, legend) } }
-    : view
+  const below = firstBelow(layer, at, isTransparent)
+  return below ? { ...view, inherited: { layer: below.layer, ...behaviorView(below.value, legend) } } : view
 }
 
 /**
@@ -102,12 +122,17 @@ export function slotsName(slots: SlotLabels): string {
  * キーが1つも割り当てられていないレイヤーか。図に出るキーが、すべて「何もしない」か透過の時。
  * 図の見え方と合わせるため、欄に展開した後の動作で見る（4つとも空の枠を指す Tap Dance も、何もしないキー）
  */
-export function isLayerEmpty(snapshot: KeyboardSnapshot, layer: number, keys: readonly PlacedKey[]): boolean {
+export function isLayerEmpty(
+  snapshot: KeyboardSnapshot,
+  layer: number,
+  keys: readonly PlacedKey[],
+  edits: Edits = EMPTY_EDITS,
+): boolean {
   return keys
     .filter((key) => key.kind === 'key')
     .every((key) => {
-      const behavior = decodeKey(keycodeAt(snapshot, layer, targetOf(key)) ?? 0, snapshot.tapDances)
-      return isNone(behavior) || isTransparent(behavior)
+      const behavior = behaviorAt(snapshot, layer, targetOf(key), [], edits)
+      return !behavior || isNone(behavior) || isTransparent(behavior)
     })
 }
 
@@ -119,6 +144,10 @@ export function isLong(text: string): boolean {
 }
 
 /** 図の上の場所の名前。読み上げと、マウスを載せた時の説明に使う */
+/** キーの場所の名前。編集欄と、枠を使っているキーの一覧に出す */
+export const placeName = (layer: number, key: { row: number; col: number }) =>
+  `レイヤー ${layer} ・ 行 ${key.row} 列 ${key.col}`
+
 export function targetName(key: PlacedKey): string {
   if (key.kind === 'encoder') return `エンコーダー ${key.encoder + 1} の${key.direction === 'left' ? '左回し' : '右回し'}`
   return `行 ${key.row}・列 ${key.col} のキー`

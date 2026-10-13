@@ -3,9 +3,8 @@ import { isWebHidSupported } from './browserSupport.ts'
 import type { DeviceConnector, KeyboardDevice } from './device/types.ts'
 import { countEdits, EMPTY_SESSION, hasUnwrittenChanges, sessionReducer, type ReloadChoice } from './session/editState.ts'
 import { AppHeader } from './ui/AppHeader.tsx'
-import { DebugEditPanel, type DebugTools } from './ui/DebugEditPanel.tsx'
 import { DeviceInfoDialog } from './ui/DeviceInfoDialog.tsx'
-import { slotCounts } from './ui/deviceInfo.ts'
+import { editSlotCounts } from './ui/deviceInfo.ts'
 import { EditSessionContext } from './ui/editContext.ts'
 import { KeymapView } from './ui/KeymapView.tsx'
 import { ReloadDialog } from './ui/ReloadDialog.tsx'
@@ -27,8 +26,6 @@ interface Props {
   connector: DeviceConnector
   /** このブラウザーで接続できるか。省くと、WebHID があるかで決める */
   supported?: boolean
-  /** 偽の機器への操作。渡すと、確認用の仮の入口を出す（?fake&debugEdit。編集欄ができたら消す） */
-  debug?: DebugTools
 }
 
 /**
@@ -36,7 +33,7 @@ interface Props {
  * 1回も読み出していない間は、中身の代わりに中央のカードを出す。
  * 読み出した後は、接続が切れても、読み込んだ内容と編集を画面に残し、帯で知らせる
  */
-function App({ connector, supported = isWebHidSupported(), debug }: Props) {
+function App({ connector, supported = isWebHidSupported() }: Props) {
   const { state: connection, open, close } = useConnection(connector)
   const device = connection.status === 'connected' ? connection.device : null
   const { state: reading, read, replace } = useDeviceRead(device)
@@ -47,6 +44,8 @@ function App({ connector, supported = isWebHidSupported(), debug }: Props) {
   const report = reading?.status === 'done' ? reading.report : null
   const { edit, pending } = session
   const changes = edit ? countEdits(edit) : 0
+  // 残り枠数は、編集を当てはめた後の数。編集に合わせて増減する
+  const slots = useMemo(() => edit && editSlotCounts(edit), [edit])
 
   useLeaveConfirm(edit !== null && hasUnwrittenChanges(edit))
 
@@ -92,13 +91,12 @@ function App({ connector, supported = isWebHidSupported(), debug }: Props) {
         <AppHeader
           connection={connection}
           supported={supported}
-          slots={edit && slotCounts(edit.source)}
+          slots={slots}
           changes={changes}
           onConnect={connect}
           onDisconnect={close}
           onDeviceInfo={report ? showInfo : null}
         />
-        {debug && <DebugEditPanel tools={debug} />}
         {edit && (
           <nav className="app-tabs" aria-label="画面の切り替え">
             {TABS.map(({ id, name }) => (
@@ -111,7 +109,7 @@ function App({ connector, supported = isWebHidSupported(), debug }: Props) {
         <main>
           {edit ? (
             tab === 'keymap' ? (
-              <KeymapView snapshot={edit.source} />
+              <KeymapView state={edit} onAction={dispatch} />
             ) : (
               <p className="placeholder">コンボの設定は準備中です。</p>
             )
