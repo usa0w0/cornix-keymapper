@@ -7,7 +7,8 @@ import type { LayoutDefinition } from '../device/types.ts'
 import { formatKeycode, isKeyCode, MOD_KINDS, type Action, type LayerMode, type Mod } from './action.ts'
 
 const KC_NO = 0x0000
-const KC_TRANSPARENT = 0x0001
+/** 透過（下のレイヤーの動作をそのまま使う）のキーコード */
+export const KC_TRANSPARENT = 0x0001
 /** 修飾キーそのもののキーコード。左の Ctrl・Shift・Alt・GUI、右の Ctrl・Shift・Alt・GUI の順 */
 const MODIFIER_KEYS = 0x00e0
 /** 修飾キー付きのキー。下位 8 ビットがキー、その上の 4 ビットが修飾の種類、さらに上の 1 ビットが右側 */

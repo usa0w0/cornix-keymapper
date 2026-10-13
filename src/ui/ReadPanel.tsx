@@ -4,6 +4,7 @@ import {
   type KeyboardSnapshot,
   type ReadProgress,
 } from '../device/types.ts'
+import { KeymapView } from './KeymapView.tsx'
 import {
   buildReadReport,
   countDifferences,
@@ -18,7 +19,7 @@ type ReadState =
   | { status: 'failed'; message: string }
   | { status: 'done'; report: ReadReport }
 
-/** 本体の設定を読み出し、生の値のまま表示する（読み出しだけの最小版） */
+/** 本体の設定を読み出し、キーボード図と、生の値の表を表示する */
 export function ReadPanel({ device }: { device: KeyboardDevice }) {
   const [state, setState] = useState<ReadState>({ status: 'idle' })
   const [previous, setPrevious] = useState<KeyboardSnapshot | null>(null)
@@ -100,7 +101,12 @@ export function ReadPanel({ device }: { device: KeyboardDevice }) {
           読み出しに失敗しました。{state.message}
         </p>
       )}
-      {state.status === 'done' && <ReadResult report={state.report} />}
+      {state.status === 'done' && (
+        <>
+          <KeymapView snapshot={state.report.snapshot} />
+          <ReadResult report={state.report} />
+        </>
+      )}
     </section>
   )
 }
