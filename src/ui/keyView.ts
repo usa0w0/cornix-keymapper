@@ -64,12 +64,20 @@ export function behaviorView(behavior: KeyBehavior, legend: Legend): { state: Ke
   return { state, slots }
 }
 
-/** その場所の編集。編集していなければ undefined。編集できるのは、キーだけ（エンコーダーは #12） */
-const keyEditAt = (edits: Edits, layer: number, target: KeyTarget) =>
-  target.kind === 'key' ? edits.keys.find((edit) => edit.layer === layer && edit.key === target.index) : undefined
+/**
+ * その場所の編集を、キーの動作の形にしたもの。編集していなければ undefined。
+ * エンコーダーは動作1つなので、その動作をタップ欄に入れて出す
+ */
+function editedAt(edits: Edits, layer: number, target: KeyTarget): KeyBehavior | undefined {
+  if (target.kind === 'key') return edits.keys.find((edit) => edit.layer === layer && edit.key === target.index)?.behavior
+  const edit = edits.encoders.find(
+    (item) => item.layer === layer && item.encoder === target.encoder && item.direction === target.direction,
+  )
+  return edit && { tap: edit.action }
+}
 
 /** その場所を、利用者が変えているか */
-export const isChanged = (edits: Edits, layer: number, target: KeyTarget) => keyEditAt(edits, layer, target) !== undefined
+export const isChanged = (edits: Edits, layer: number, target: KeyTarget) => editedAt(edits, layer, target) !== undefined
 
 /**
  * その場所の、編集を当てはめた後の動作。本体から読んだ設定にない場所は undefined。
@@ -85,8 +93,8 @@ export function behaviorAt(
 ): KeyBehavior | undefined {
   const keycode = keycodeAt(snapshot, layer, target)
   if (keycode === undefined) return undefined
-  const edit = keyEditAt(edits, layer, target)
-  if (edit) return edit.behavior
+  const edited = editedAt(edits, layer, target)
+  if (edited) return edited
   return target.kind === 'key' ? decodeKey(keycode, snapshot.tapDances, custom) : { tap: keycodeToAction(keycode, custom) }
 }
 
@@ -144,13 +152,17 @@ export function isLong(text: string): boolean {
   return width > 5
 }
 
-/** 図の上の場所の名前。読み上げと、マウスを載せた時の説明に使う */
 /** キーの場所の名前。編集欄と、枠を使っているキーの一覧に出す */
 export const placeName = (layer: number, key: { row: number; col: number }) =>
   `レイヤー ${layer} ・ 行 ${key.row} 列 ${key.col}`
 
+/** エンコーダーの1方向の名前 */
+export const encoderName = (turn: { encoder: number; direction: 'left' | 'right' }) =>
+  `エンコーダー ${turn.encoder + 1} の${turn.direction === 'left' ? '左回し' : '右回し'}`
+
+/** 図の上の場所の名前。読み上げと、マウスを載せた時の説明に使う */
 export function targetName(key: PlacedKey): string {
-  if (key.kind === 'encoder') return `エンコーダー ${key.encoder + 1} の${key.direction === 'left' ? '左回し' : '右回し'}`
+  if (key.kind === 'encoder') return encoderName(key)
   return `行 ${key.row}・列 ${key.col} のキー`
 }
 

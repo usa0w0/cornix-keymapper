@@ -12,7 +12,7 @@ interface FigureProps {
   isChanged?: (target: KeyTarget) => boolean
   /** 選択中の場所 */
   selected?: KeyTarget | null
-  /** キーを押した時。渡すと、キーを押せる部品にする。エンコーダーは、まだ選べない（#12） */
+  /** キーか、エンコーダーの1方向を押した時。渡すと、押せる部品にする */
   onSelect?: (target: KeyTarget) => void
 }
 
@@ -34,7 +34,10 @@ export function KeyboardFigure({ keys, viewOf, isChanged, selected, onSelect }: 
           const shape = key.kind === 'encoder' ? ` encoder encoder-${key.direction}` : ''
           const name = `${targetName(key)}: ${titleOf(view)}${changed ? '（変更あり）' : ''}`
           const className = `key state-${view.state}${shape}${changed ? ' changed' : ''}`
-          if (key.kind === 'key' && onSelect) {
+          const turn = key.kind === 'encoder' && (
+            <span className="encoder-turn">{key.direction === 'left' ? '↺ 左回し' : '右回し ↻'}</span>
+          )
+          if (onSelect) {
             return (
               <button
                 type="button"
@@ -46,6 +49,7 @@ export function KeyboardFigure({ keys, viewOf, isChanged, selected, onSelect }: 
                 title={name}
                 onClick={() => onSelect(target)}
               >
+                {turn}
                 <KeyFace view={view} changed={changed} />
               </button>
             )
@@ -60,9 +64,7 @@ export function KeyboardFigure({ keys, viewOf, isChanged, selected, onSelect }: 
               aria-label={name}
               title={name}
             >
-              {key.kind === 'encoder' && (
-                <span className="encoder-turn">{key.direction === 'left' ? '↺ 左回し' : '右回し ↻'}</span>
-              )}
+              {turn}
               <KeyFace view={view} changed={changed} />
             </div>
           )

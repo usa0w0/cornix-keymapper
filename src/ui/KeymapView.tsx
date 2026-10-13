@@ -1,11 +1,12 @@
 import { useId, useMemo, useState } from 'react'
-import { layerModesFor, type Legend } from '../model/action.ts'
+import { layerModesFor, type Action, type Legend } from '../model/action.ts'
 import type { KeyBehavior } from '../model/behavior.ts'
-import { linkedKeys, type KeyPlace } from '../model/edits.ts'
+import { linkedKeys, type EditPlace, type KeyPlace } from '../model/edits.ts'
 import { customKeycodesOf } from '../model/keycodes.ts'
 import { placeKeys } from '../model/layout.ts'
 import {
   planKeys,
+  tryEditEncoder,
   tryEditKey,
   tryEditKeysTogether,
   tryRevertEdit,
@@ -14,7 +15,7 @@ import {
 } from '../session/editState.ts'
 import { KeyboardFigure, KeyFace } from './KeyboardFigure.tsx'
 import { KeyEditor } from './KeyEditor.tsx'
-import { behaviorAt, isChanged, isLayerEmpty, keyViewOf, type KeyTarget, type KeyView } from './keyView.ts'
+import { behaviorAt, isChanged, isLayerEmpty, keyViewOf, targetId, targetOf, type KeyTarget, type KeyView } from './keyView.ts'
 import { decideSharedEdit, sharedKeyList, type SharedAnswer } from './sharedKey.ts'
 import { SharedKeyDialog } from './SharedKeyDialog.tsx'
 import { SlotShortageDialog } from './SlotShortageDialog.tsx'
@@ -53,7 +54,7 @@ interface Props {
 
 /**
  * キーマップの表示と編集。レイヤーの行（番号、凡例を開く「?」、刻印の切り替え）、選んだレイヤーのキーボード図、
- * 図で選んだキーの編集欄
+ * 図で選んだキー（か、エンコーダーの1方向）の編集欄
  */
 export function KeymapView({ state, onAction }: Props) {
   const { source: snapshot, edits } = state
@@ -61,8 +62,8 @@ export function KeymapView({ state, onAction }: Props) {
   // 読み直してレイヤー数が減った時に、ないレイヤーを指したままにしない
   const layer = Math.min(selectedLayer, Math.max(snapshot.keymap.length - 1, 0))
   const [legend, setLegend] = useState<Legend>('us')
-  // 選んだキーの番号。レイヤーを切り替えても、同じ場所を選んだままにする
-  const [selectedKey, setSelectedKey] = useState<number | null>(null)
+  // 選んだ場所（キーか、エンコーダーの1方向）。レイヤーを切り替えても、同じ場所を選んだままにする
+  const [selectedTarget, setSelectedTarget] = useState<KeyTarget | null>(null)
   const [shortage, setShortage] = useState<Shortage | null>(null)
   const [confirm, setConfirm] = useState<SharedConfirm | null>(null)
   // 共有中のキーの確認への答え。そのキーを選んでいる間だけ覚える（欄を1つ変えるたびに、確認を出さないため）
@@ -72,8 +73,9 @@ export function KeymapView({ state, onAction }: Props) {
   const custom = useMemo(() => customKeycodesOf(snapshot.layout), [snapshot.layout])
   const plan = useMemo(() => planKeys(state), [state])
 
-  const selectedPlace = keys.find((key) => key.kind === 'key' && key.index === selectedKey)
-  const selected: KeyTarget | null = selectedPlace?.kind === 'key' ? { kind: 'key', index: selectedPlace.index } : null
+  // 読み直してレイアウトが変わった時に、ない場所を選んだままにしない
+  const selectedPlace = selectedTarget && keys.find((key) => targetId(targetOf(key)) === targetId(selectedTarget))
+  const selected: KeyTarget | null = selectedPlace ? targetOf(selectedPlace) : null
   const viewOf = (target: KeyTarget) => keyViewOf(snapshot, layer, target, legend, custom, edits)
   const behavior = selected && behaviorAt(snapshot, layer, selected, custom, edits)
 
@@ -82,8 +84,8 @@ export function KeymapView({ state, onAction }: Props) {
     setLayer(index)
     setAnswer(null)
   }
-  const selectKey = (key: number) => {
-    setSelectedKey(key)
+  const select = (target: KeyTarget) => {
+    setSelectedTarget(target)
     setAnswer(null)
   }
 
@@ -112,9 +114,14 @@ export function KeymapView({ state, onAction }: Props) {
     if (decision.kind === 'ask') return setConfirm({ place, behavior: next, keys: decision.keys })
     apply({ place, behavior: next, together: decision.kind === 'together' ? decision.keys : null })
   }
+  // エンコーダーは動作1つで、枠を使わないので、共有の確認は要らない
+  const changeEncoder = (encoder: number, direction: 'left' | 'right', action: Action) => {
+    if (tryEditEncoder(state, layer, encoder, direction, action).blocked) return setShortage({ attempted: true })
+    onAction({ type: 'editEncoder', layer, encoder, direction, action })
+  }
   // 空いた枠をほかのキーが使った後で、枠を空けた編集を取り消すと、枠が足りなくなる。これも止める
-  const revert = (key: number) => {
-    const place = { kind: 'key', layer, key } as const
+  const revert = (target: KeyTarget) => {
+    const place: EditPlace = target.kind === 'key' ? { kind: 'key', layer, key: target.index } : { ...target, layer }
     if (tryRevertEdit(state, place).blocked) return setShortage({ attempted: true })
     onAction({ type: 'revert', place })
     setAnswer(null)
@@ -168,29 +175,33 @@ export function KeymapView({ state, onAction }: Props) {
           viewOf={viewOf}
           isChanged={(target) => isChanged(edits, layer, target)}
           selected={selected}
-          onSelect={(target) => target.kind === 'key' && selectKey(target.index)}
+          onSelect={select}
         />
       )}
-      {selectedPlace?.kind === 'key' && selected && behavior ? (
+      {selectedPlace && selected && behavior ? (
         <KeyEditor
           // 別のキーを選んだら、欄の選択を「タップ」に戻す
-          key={`${layer}:${selectedPlace.index}`}
+          key={`${layer}:${targetId(selected)}`}
           layer={layer}
           place={selectedPlace}
           behavior={behavior}
           view={viewOf(selected)}
           changed={isChanged(edits, layer, selected)}
-          linked={linkedKeys(edits.keys, { layer, key: selectedPlace.index }).length}
+          linked={selected.kind === 'key' ? linkedKeys(edits.keys, { layer, key: selected.index }).length : 1}
           legend={legend}
           layerCount={snapshot.keymap.length}
           layerModes={layerModesFor(snapshot.capabilities.vialProtocol).modes}
-          onChange={(next) => change(selectedPlace.index, next)}
-          onRevert={() => revert(selectedPlace.index)}
+          onChange={(next) =>
+            selected.kind === 'key'
+              ? change(selected.index, next)
+              : changeEncoder(selected.encoder, selected.direction, next.tap ?? { kind: 'none' })
+          }
+          onRevert={() => revert(selected)}
         />
       ) : (
         keys.length > 0 && (
           <section className="edit" aria-label="選んだキー">
-            <p className="edit-empty">キーをクリックすると、ここで動作を変えられます。</p>
+            <p className="edit-empty">キーかエンコーダーをクリックすると、ここで動作を変えられます。</p>
           </section>
         )
       )}
@@ -215,7 +226,7 @@ export function KeymapView({ state, onAction }: Props) {
           attempted={shortage.attempted}
           onJump={(toLayer, key) => {
             selectLayer(toLayer)
-            selectKey(key)
+            select({ kind: 'key', index: key })
             setShortage(null)
           }}
           onOverwrite={

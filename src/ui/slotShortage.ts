@@ -31,7 +31,7 @@ export function shortageList(state: EditState, legend: Legend): ShortageList {
   const plan = planKeys(state)
   const custom = customKeycodesOf(source.layout)
   const { cols } = source.layout
-  const rows = tapDanceUses({ ...source, keymap: plan.keymap, tapDances: plan.tapDances }).map((use): ShortageRow => {
+  const rows = tapDanceUses({ ...source, keymap: plan.keymap, encoders: plan.encoders, tapDances: plan.tapDances }).map((use): ShortageRow => {
     const behavior = decodeKey(TAP_DANCE.from + use.slot, plan.tapDances, custom)
     return {
       slot: use.slot,

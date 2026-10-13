@@ -24,12 +24,16 @@ test('レイヤーの行と、レイアウト定義どおりの数のキーと�
   // キー1つぶんは 64px で、すき間が 4px
   expect(html).toContain('left:192px;top:0;width:60px;height:60px')
   // 場所と動作は、マウスを載せなくても読み上げられる名前として持つ
-  expect(html).toContain('role="img" aria-label="エンコーダー 1 の左回し: マウスのホイールを上へ"')
+  expect(html).toContain('aria-label="エンコーダー 1 の左回し: マウスのホイールを上へ"')
   expect(html).toContain('aria-label="行 0・列 1 のキー: Q"')
-  // キーは押して選べる。エンコーダーは、まだ選べない。最初は、どのキーも選ばれていない
-  expect(count(html, '<button type="button" class="key state-')).toBe(50)
+  // キーも、エンコーダーの左回し・右回しも、押して選べる。最初は、どれも選ばれていない
+  expect(count(html, '<button type="button" class="key state-')).toBe(54)
+  expect(html).toContain(
+    '<button type="button" class="key state-normal encoder encoder-left" style="left:976px;top:152.32px;width:60px;height:60px;transform-origin:-976px -152.32px" aria-pressed="false"',
+  )
+  expect(html).toContain('<span class="encoder-turn">↺ 左回し</span><span class="face-main"><b class="long">ホイール↑</b></span></button>')
   expect(html).not.toMatch(/class="key [^"]*"[^>]*aria-pressed="true"/)
-  expect(html).toContain('キーをクリックすると、ここで動作を変えられます。')
+  expect(html).toContain('キーかエンコーダーをクリックすると、ここで動作を変えられます。')
 })
 
 test('実機の設定: Tap Dance とレイヤー切り替えのキーを、タップを大きく、長押しを印つきで小さく出す', () => {

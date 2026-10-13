@@ -27,6 +27,7 @@ import {
   planKeys,
   sessionReducer,
   sharedKeys,
+  tryEditEncoder,
   tryEditKey,
   tryEditKeysTogether,
   tryRevertEdit,
@@ -700,4 +701,98 @@ test('連動して変更は、reducer からも同じ結果になる。1つだ�
   expect(run([{ type: 'revert', place: { kind: 'key', layer: 2, key: 26 } }], session).edit!.edits).toEqual(EMPTY_EDITS)
   expect(editKeysTogether(loaded.edit!, [SLOT0[0]], SPACE_GUI_ESC)).toEqual(editKey(loaded.edit!, 0, 26, SPACE_GUI_ESC))
   expect(editKeysTogether(loaded.edit!, [], SPACE_GUI_ESC)).toBe(loaded.edit)
+})
+
+// ---- エンコーダー ----
+
+const WHEEL_UP: Action = { kind: 'key', code: 0xd9, mods: [] }
+const VOLUME_UP: Action = { kind: 'key', code: 0xa9, mods: [] }
+
+test('実機の設定: エンコーダーの編集は、目標の、その方向だけを変える。取り消すと、基準と同じ目標に戻る', () => {
+  const loaded = loadSnapshot(cornixSnapshot())
+  // レイヤー 0 の1つ目は [ホイール↑, ホイール↓]、レイヤー 1 の1つ目は [音量−, 音量＋]
+  let state = editEncoder(loaded, 0, 0, 'left', VOLUME_UP)
+  state = editEncoder(state, 1, 0, 'right', { kind: 'none' })
+  expect(countEdits(state)).toBe(2)
+  const target = buildTarget(state)
+  expect(target.encoders[0][0]).toEqual([0x00a9, 0x00da])
+  expect(target.encoders[1][0]).toEqual([0x00aa, 0x0000])
+  expect({ ...target, encoders: loaded.baseline.encoders }).toEqual(loaded.baseline)
+  // 出発点と同じ動作を入れ直すと、編集ではなくなる
+  expect(countEdits(editEncoder(state, 0, 0, 'left', WHEEL_UP))).toBe(1)
+  state = revertEdit(state, { kind: 'encoder', layer: 0, encoder: 0, direction: 'left' })
+  state = revertEdit(state, { kind: 'encoder', layer: 1, encoder: 0, direction: 'right' })
+  expect(state.edits).toEqual(EMPTY_EDITS)
+  expect(sameSnapshot(buildTarget(state), loaded.baseline)).toBe(true)
+})
+
+test('エンコーダーに「押している間だけレイヤー N」は入れられない（状態に反映せずに止める）。ほかのレイヤー切り替えは入る', () => {
+  const loaded = loadSnapshot(cornixSnapshot())
+  const held = tryEditEncoder(loaded, 0, 0, 'left', { kind: 'layer', mode: 'momentary', layer: 1 })
+  expect(held.state).toBe(loaded)
+  expect(held.blocked?.invalidEncoders).toHaveLength(1)
+  const toggled = tryEditEncoder(loaded, 0, 0, 'left', { kind: 'layer', mode: 'toggle', layer: 1 })
+  expect(toggled.blocked).toBeNull()
+  expect(buildTarget(toggled.state).encoders[0][0][0]).toBe(0x5261)
+  // reducer からも同じ
+  const session = { edit: loaded, pending: null }
+  expect(sessionReducer(session, { type: 'editEncoder', layer: 0, encoder: 0, direction: 'left', action: { kind: 'layer', mode: 'momentary', layer: 1 } })).toBe(session)
+  expect(sessionReducer(session, { type: 'editEncoder', layer: 0, encoder: 0, direction: 'left', action: VOLUME_UP }).edit!.edits.encoders).toHaveLength(1)
+})
+
+test('本体から読んだエンコーダーが Tap Dance を指している時: 別の動作で上書きすると、その枠が空く。取り消すと、元の値に戻る', () => {
+  const source = altered((s) => {
+    s.tapDances[2] = { onTap: 0x04, onHold: 0, onDoubleTap: 0x29, onTapHold: 0, tappingTerm: 250 }
+    s.encoders[3][1] = [0x5702, 0x00da]
+  })
+  const loaded = loadSnapshot(source)
+  expect(planKeys(loaded).free).toBe(29)
+  const edited = editEncoder(loaded, 3, 1, 'left', VOLUME_UP)
+  expect(planKeys(edited).free).toBe(30)
+  const target = buildTarget(edited)
+  expect(target.encoders[3][1]).toEqual([0x00a9, 0x00da])
+  expect(target.tapDances[2]).toEqual({ onTap: 0, onHold: 0, onDoubleTap: 0, onTapHold: 0, tappingTerm: 250 })
+  const reverted = revertEdit(edited, { kind: 'encoder', layer: 3, encoder: 1, direction: 'left' })
+  expect(sameSnapshot(buildTarget(reverted), source)).toBe(true)
+})
+
+test('エンコーダーの編集で空いた枠を、キーが使った後では、エンコーダーの取り消しを止める（枠が足りなくなるため）', () => {
+  // 空いている枠がなく、枠 31 はエンコーダーだけが指している
+  const source = altered((s) => {
+    for (let slot = 2; slot < 32; slot++) {
+      s.tapDances[slot] = { onTap: 0x04 + slot, onHold: 0, onDoubleTap: 0x2c, onTapHold: 0, tappingTerm: 250 }
+      if (slot < 31) s.keymap[9][slot] = 0x5700 + slot
+    }
+    s.encoders[4][1] = [0x5700 + 31, 0x00da]
+  })
+  const loaded = loadSnapshot(source)
+  const A_ESC: KeyBehavior = { tap: A, doubleTap: { kind: 'key', code: 0x29, mods: [] } }
+  expect(tryEditKey(loaded, 0, 1, A_ESC).blocked?.missing).toBe(1)
+  const freed = editEncoder(loaded, 4, 1, 'left', VOLUME_UP)
+  const used = tryEditKey(freed, 0, 1, A_ESC)
+  expect(used.blocked).toBeNull()
+  expect(buildTarget(used.state).keymap[0][1]).toBe(0x5700 + 31)
+  const place = { kind: 'encoder', layer: 4, encoder: 1, direction: 'left' } as const
+  expect(tryRevertEdit(used.state, place).blocked?.missing).toBe(1)
+  expect(tryRevertEdit(freed, place).blocked).toBeNull()
+})
+
+test('共有: エンコーダーも同じ枠を指している時の「連動して変更」は、編集した後のエンコーダーで見る', () => {
+  // 枠 0 は、4つのキーと、エンコーダーが指している。空いている枠はない
+  const source = altered((s) => {
+    for (let slot = 2; slot < 32; slot++) {
+      s.tapDances[slot] = { onTap: 0x04 + slot, onHold: 0, onDoubleTap: 0x2c, onTapHold: 0, tappingTerm: 250 }
+      s.keymap[9][slot] = 0x5700 + slot
+    }
+    s.encoders[4][1] = [0x5700, 0x00da]
+  })
+  const loaded = loadSnapshot(source)
+  const keys = sharedKeys(loaded, { layer: 0, key: 26 })
+  expect(keys).toHaveLength(4)
+  const A_ESC: KeyBehavior = { tap: A, doubleTap: { kind: 'key', code: 0x29, mods: [] } }
+  // エンコーダーが指している間は、元の枠が残るので、枠が1つ要る
+  expect(tryEditKeysTogether(loaded, keys, A_ESC).blocked?.missing).toBe(1)
+  // エンコーダーを変えた後は、元の枠が空くので、通る
+  const freed = editEncoder(loaded, 4, 1, 'left', VOLUME_UP)
+  expect(tryEditKeysTogether(freed, keys, A_ESC).blocked).toBeNull()
 })
