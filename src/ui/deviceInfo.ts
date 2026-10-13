@@ -1,7 +1,7 @@
 // 本体の情報（対応機能と枠数）を、ヘッダーと「接続中のキーボード」のダイアログに出す形にまとめる
 import type { KeyboardSnapshot } from '../device/types.ts'
 import { layerModeName, layerModesFor } from '../model/action.ts'
-import { countFreeTapDances } from '../model/encode.ts'
+import { countFreeCombos, countFreeTapDances } from '../model/encode.ts'
 import { firmwareVersionOf } from '../model/layout.ts'
 import { planKeys, type EditState } from '../session/editState.ts'
 
@@ -14,24 +14,23 @@ export interface SlotCount {
 
 /**
  * Tap Dance とコンボの、残り枠数。
- * Tap Dance の空いている枠は、中身が空で、キー・エンコーダー・コンボの出力のどこからも指されていない枠
+ * Tap Dance の空いている枠は、中身が空で、キー・エンコーダー・コンボ（同時に押すキーと出力）のどこからも指されていない枠
  * （docs/design.md「枠の割り当て」）。コンボの空いている枠は、キーも出力も入っていない枠
  */
 export function slotCounts(snapshot: KeyboardSnapshot): { tapDance: SlotCount; combo: SlotCount } {
-  const freeCombos = snapshot.combos.filter((combo) => !combo.output && combo.keys.every((key) => !key))
   return {
     tapDance: { total: snapshot.tapDances.length, free: countFreeTapDances(snapshot) },
-    combo: { total: snapshot.combos.length, free: freeCombos.length },
+    combo: { total: snapshot.combos.length, free: countFreeCombos(snapshot.combos) },
   }
 }
 
-/**
- * ヘッダーに出す残り枠数。Tap Dance は、編集を当てはめた後の、枠の割り当ての計算から出す（編集に合わせて増減する）。
- * コンボは、まだ編集できないので、出発点の数（#13）
- */
+/** ヘッダーに出す残り枠数。編集を当てはめた後の、枠の割り当ての計算から出す（編集に合わせて増減する） */
 export function editSlotCounts(state: EditState): { tapDance: SlotCount; combo: SlotCount } {
-  const counts = slotCounts(state.source)
-  return { ...counts, tapDance: { total: counts.tapDance.total, free: planKeys(state).free } }
+  const plan = planKeys(state)
+  return {
+    tapDance: { total: state.source.tapDances.length, free: plan.free },
+    combo: { total: state.source.combos.length, free: plan.freeCombos },
+  }
 }
 
 export interface InfoRow {

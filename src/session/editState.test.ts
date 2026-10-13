@@ -9,6 +9,9 @@ import { customKeycodesOf, keycodeToAction } from '../model/keycodes.ts'
 import {
   addCombo,
   buildTarget,
+  comboKeyAt,
+  comboList,
+  combosOfKey,
   countEdits,
   editCombo,
   editEncoder,
@@ -27,6 +30,8 @@ import {
   planKeys,
   sessionReducer,
   sharedKeys,
+  tryAddCombo,
+  tryEditCombo,
   tryEditEncoder,
   tryEditKey,
   tryEditKeysTogether,
@@ -178,6 +183,161 @@ test('コンボの編集: 位置ではなく、キーコードの組で持つ。
   // 出発点と同じ内容に戻すと、なくなる。空の枠を「消す」のも、編集にならない
   expect(editCombo(existing, { slot: 3 }, { keys: [0x14, 0x1a], output: keycodeToAction(0x29) }).edits).toEqual(EMPTY_EDITS)
   expect(editCombo(loaded, { slot: 4 }, null)).toBe(loaded)
+})
+
+// 実機の設定のレイヤー 0: Q が キー 1、W が キー 2、B が キー 19 と 41、キー 6 は空、キー 26 は Tap Dance（枠 0）
+const Q = 0x14
+const W = 0x1a
+const ESC: Action = { kind: 'key', code: 0x29, mods: [] }
+
+test('コンボのキーにする時の持ち方: 編集していないキーは出発点のキーコード。空のキーと透過のキーは選べない', () => {
+  const state = loadSnapshot(altered((s) => (s.keymap[1][1] = 0x0001)))
+  expect(comboKeyAt(state, { layer: 0, key: 1 })).toBe(Q)
+  // 長押しなどを設定したキーは、タップ側ではなく、そのキーのキーコード全体
+  expect(comboKeyAt(state, { layer: 0, key: 26 })).toBe(0x5700)
+  expect(comboKeyAt(state, { layer: 0, key: 6 })).toBeUndefined()
+  expect(comboKeyAt(state, { layer: 1, key: 1 })).toBeUndefined()
+  expect(comboKeyAt(state, { layer: 0, key: 999 })).toBeUndefined()
+})
+
+test('コンボのキーにする時の持ち方: 編集したキーは、枠を使わなければ動作から決まるキーコード、Tap Dance になるなら4欄の中身', () => {
+  let state = loadSnapshot(cornixSnapshot())
+  state = editKey(state, 0, 1, { tap: B })
+  state = editKey(state, 0, 2, TAP_A_HOLD_CTRL)
+  state = editKey(state, 0, 3, { tap: A, doubleTap: ESC })
+  state = editKey(state, 0, 4, { tap: { kind: 'none' } })
+  expect(comboKeyAt(state, { layer: 0, key: 1 })).toBe(0x05)
+  expect(comboKeyAt(state, { layer: 0, key: 2 })).toBe(0x2104)
+  expect(comboKeyAt(state, { layer: 0, key: 3 })).toEqual({ tapDance: { onTap: 0x04, onHold: 0, onDoubleTap: 0x29, onTapHold: 0 } })
+  expect(comboKeyAt(state, { layer: 0, key: 4 })).toBeUndefined()
+  // 欄をすべて消したキーも、空のキー
+  expect(comboKeyAt(editKey(state, 0, 5, {}), { layer: 0, key: 5 })).toBeUndefined()
+})
+
+test('コンボの一覧: 本体に入っているコンボ（枠の番号順）の後に、足したコンボ。消したコンボと空の枠は出さない', () => {
+  const source = altered((s) => {
+    s.combos[1] = { keys: [Q, W, 0, 0], output: 0x29 }
+    s.combos[4] = { keys: [0x04, 0x5700, 0, 0], output: 0x5703 }
+    s.combos[6] = { keys: [0x06, 0x07, 0, 0], output: 0x2a }
+  })
+  let state = loadSnapshot(source)
+  expect(comboList(state)).toEqual([
+    { ref: { slot: 1 }, combo: { keys: [Q, W], output: ESC }, keycodes: [Q, W], changed: false },
+    // 出力が Tap Dance のコンボは、このサイトで扱わない動作として、元の値を保つ
+    {
+      ref: { slot: 4 },
+      combo: { keys: [0x04, 0x5700], output: { kind: 'unsupported', raw: 0x5703, label: 'Tap Dance 3' } },
+      keycodes: [0x04, 0x5700],
+      changed: false,
+    },
+    { ref: { slot: 6 }, combo: { keys: [0x06, 0x07], output: keycodeToAction(0x2a) }, keycodes: [0x06, 0x07], changed: false },
+  ])
+  state = editCombo(state, { slot: 1 }, { keys: [Q, W, 0x08], output: ESC })
+  state = editCombo(state, { slot: 6 }, null)
+  // Tap Dance になるキーを、コンボのキーにする
+  state = editKey(state, 0, 3, { tap: A, doubleTap: ESC })
+  const pending = comboKeyAt(state, { layer: 0, key: 3 })!
+  state = addCombo(state, { keys: [Q, pending], output: B })
+  expect(comboList(state)).toEqual([
+    { ref: { slot: 1 }, combo: { keys: [Q, W, 0x08], output: ESC }, keycodes: [Q, W, 0x08], changed: true },
+    expect.objectContaining({ ref: { slot: 4 }, changed: false }),
+    { ref: { added: 0 }, combo: { keys: [Q, pending], output: B }, keycodes: [Q, 0x5702], changed: true },
+  ])
+  expect(countEdits(state)).toBe(4)
+  // 目標では、消した枠に、足したコンボが入るのではなく、空いている枠の小さい番号（0）に入る。消した枠は空になる
+  const target = buildTarget(state)
+  expect(target.combos[0]).toEqual({ keys: [Q, 0x5702, 0, 0], output: 0x05 })
+  expect(target.combos[1]).toEqual({ keys: [Q, W, 0x08, 0], output: 0x29 })
+  expect(target.combos[4]).toEqual(source.combos[4])
+  expect(target.combos[6]).toEqual({ keys: [0, 0, 0, 0], output: 0 })
+  expect(target.keymap[0][3]).toBe(0x5702)
+})
+
+test('コンボの枠が足りない追加と、本体の設定に直せないコンボは、状態に反映せずに止める', () => {
+  const fullCombos = altered((s) => {
+    s.combos = s.combos.map((_, slot) => ({ keys: [0x04, 0x05 + slot, 0, 0], output: 0x29 }))
+  })
+  const state = loadSnapshot(fullCombos)
+  expect(planKeys(state).freeCombos).toBe(0)
+  const stopped = tryAddCombo(state, { keys: [Q, W], output: A })
+  expect(stopped.state).toBe(state)
+  expect(stopped.blocked).toMatchObject({ missingCombos: 1 })
+  expect(run([{ type: 'addCombo', combo: { keys: [Q, W], output: A } }], { edit: state, pending: null }).edit).toBe(state)
+  // 1つ消せば、足せる。残り枠数は、編集に合わせて増減する
+  const removed = tryEditCombo(state, { slot: 3 }, null)
+  expect(removed.blocked).toBeNull()
+  expect(planKeys(removed.state).freeCombos).toBe(1)
+  const added = tryAddCombo(removed.state, { keys: [Q, W], output: A })
+  expect(added.blocked).toBeNull()
+  expect(planKeys(added.state).freeCombos).toBe(0)
+  expect(buildTarget(added.state).combos[3]).toEqual({ keys: [Q, W, 0, 0], output: 0x04 })
+
+  // 「押している間だけレイヤー N」は、コンボの出力に入れられない。キーが1個のコンボも作れない
+  const loaded = loadSnapshot(cornixSnapshot())
+  const momentary = tryAddCombo(loaded, { keys: [Q, W], output: { kind: 'layer', mode: 'momentary', layer: 1 } })
+  expect(momentary.state).toBe(loaded)
+  expect(momentary.blocked!.invalidCombos).toHaveLength(1)
+  expect(tryAddCombo(loaded, { keys: [Q], output: A }).state).toBe(loaded)
+})
+
+test('出力が Tap Dance のコンボを消すと枠が空く。空いた枠をキーが使った後は、その取り消しを止める', () => {
+  // Tap Dance の枠は、枠 2 だけが空いていて、枠 3 はコンボの出力だけが指している
+  const source = altered((s) => {
+    for (let slot = 3; slot < 32; slot++) s.tapDances[slot] = { onTap: 0x04 + slot, onHold: 0, onDoubleTap: 0x2c, onTapHold: 0, tappingTerm: 250 }
+    for (let slot = 4; slot < 32; slot++) s.keymap[9][slot] = 0x5700 + slot
+    s.combos[0] = { keys: [Q, W, 0, 0], output: 0x5703 }
+  })
+  let state = loadSnapshot(source)
+  expect(planKeys(state).free).toBe(1)
+  state = tryEditCombo(state, { slot: 0 }, null).state
+  expect(planKeys(state).free).toBe(2)
+  state = tryEditKey(state, 0, 1, { tap: A, doubleTap: B }).state
+  state = tryEditKey(state, 0, 2, { tap: B, doubleTap: A }).state
+  expect(planKeys(state)).toMatchObject({ free: 0, missing: 0 })
+  const reverted = tryRevertEdit(state, { kind: 'combo', ref: { slot: 0 } })
+  expect(reverted.state).toBe(state)
+  expect(reverted.blocked).toMatchObject({ missing: 1 })
+})
+
+test('そのキーを使っているコンボの数は、位置ではなく、キーコードで数える。動作を変えた後は、働かなくなったコンボの数を出す', () => {
+  // B は、レイヤー 0 に2つある（キー 19 と 41）
+  const source = altered((s) => {
+    s.combos[0] = { keys: [0x05, Q, 0, 0], output: 0x29 }
+    s.combos[1] = { keys: [0x05, W, 0x08, 0], output: 0x2a }
+    s.combos[2] = { keys: [0x5700, Q, 0, 0], output: 0x2a }
+  })
+  let state = loadSnapshot(source)
+  expect(combosOfKey(state, { layer: 0, key: 19 })).toEqual({ used: 2, broken: 0 })
+  expect(combosOfKey(state, { layer: 0, key: 41 })).toEqual({ used: 2, broken: 0 })
+  expect(combosOfKey(state, { layer: 0, key: 1 })).toEqual({ used: 2, broken: 0 })
+  expect(combosOfKey(state, { layer: 0, key: 26 })).toEqual({ used: 1, broken: 0 })
+  // 空のキーと、コンボにないキー
+  expect(combosOfKey(state, { layer: 0, key: 6 })).toEqual({ used: 0, broken: 0 })
+  expect(combosOfKey(state, { layer: 0, key: 4 })).toEqual({ used: 0, broken: 0 })
+  expect(combosOfKey(state, { layer: 0, key: 999 })).toEqual({ used: 0, broken: 0 })
+  // キーの動作を変えると、変える前の中身を使っていたコンボが、そのキーでは働かなくなる。同じ中身のほかのキーは、そのまま
+  state = editKey(state, 0, 19, { tap: A })
+  expect(combosOfKey(state, { layer: 0, key: 19 })).toEqual({ used: 0, broken: 2 })
+  expect(combosOfKey(state, { layer: 0, key: 41 })).toEqual({ used: 2, broken: 0 })
+  // 変えた後の中身でも当たり続けるコンボは、働かなくなる数に入れない（Q に変えると、B と Q のコンボには当たる）
+  state = editKey(state, 0, 19, { tap: { kind: 'key', code: Q, mods: [] } })
+  expect(combosOfKey(state, { layer: 0, key: 19 })).toEqual({ used: 2, broken: 1 })
+  // 働かなくなったコンボを消すと、数が減る。変更を取り消すと、元に戻る
+  state = editCombo(state, { slot: 1 }, null)
+  expect(combosOfKey(state, { layer: 0, key: 19 })).toEqual({ used: 2, broken: 0 })
+  expect(combosOfKey(revertEdit(state, { kind: 'key', layer: 0, key: 19 }), { layer: 0, key: 19 })).toEqual({ used: 1, broken: 0 })
+})
+
+test('Tap Dance のキーの動作を変えた時も、変える前のキーコードを使っていたコンボを、働かなくなった数に入れる', () => {
+  // キー 26 は枠 0 を指す。レイヤー 1 と 2 にも、同じ枠を指すキーがある
+  const source = altered((s) => (s.combos[0] = { keys: [0x5700, Q, 0, 0], output: 0x29 }))
+  let state = loadSnapshot(source)
+  state = editKey(state, 0, 26, { tap: A, doubleTap: ESC })
+  expect(combosOfKey(state, { layer: 0, key: 26 })).toEqual({ used: 0, broken: 1 })
+  expect(combosOfKey(state, { layer: 1, key: 26 })).toEqual({ used: 1, broken: 0 })
+  // 変えた後のキーを、コンボのキーにすると、そのコンボには使われている
+  state = addCombo(state, { keys: [W, comboKeyAt(state, { layer: 0, key: 26 })!], output: B })
+  expect(combosOfKey(state, { layer: 0, key: 26 })).toEqual({ used: 1, broken: 1 })
 })
 
 test('編集を取り消す: その場所の編集だけがなくなる', () => {
@@ -404,7 +564,6 @@ test('偽の機器: 切断してつなぎ直しても編集が残る。本体が
 
 // ---- Tap Dance の枠の割り当てと、枠が足りない編集 ----
 
-const ESC: Action = { kind: 'key', code: 0x29, mods: [] }
 const A_ESC: KeyBehavior = { tap: A, doubleTap: ESC }
 const B_ESC: KeyBehavior = { tap: B, doubleTap: ESC }
 

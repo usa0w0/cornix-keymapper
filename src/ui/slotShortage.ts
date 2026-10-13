@@ -13,7 +13,7 @@ export interface ShortageRow {
   name: string
   /** この枠を使っているキー。押すと、そのキーへ移る */
   keys: { layer: number; key: number; place: string }[]
-  /** この枠を使っている、エンコーダーの方向とコンボの出力の数 */
+  /** この枠を使っている、エンコーダーの方向と、コンボ（同時に押すキーと出力）の数 */
   others: number
 }
 
@@ -31,7 +31,7 @@ export function shortageList(state: EditState, legend: Legend): ShortageList {
   const plan = planKeys(state)
   const custom = customKeycodesOf(source.layout)
   const { cols } = source.layout
-  const rows = tapDanceUses({ ...source, keymap: plan.keymap, encoders: plan.encoders, tapDances: plan.tapDances }).map((use): ShortageRow => {
+  const rows = tapDanceUses(plan).map((use): ShortageRow => {
     const behavior = decodeKey(TAP_DANCE.from + use.slot, plan.tapDances, custom)
     return {
       slot: use.slot,

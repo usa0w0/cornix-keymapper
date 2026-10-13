@@ -123,6 +123,34 @@ const turnEditor = (action: Action, changed = false) =>
     />,
   )
 
+test('キーマップのタブ: コンボに使われているキーの編集欄に、使っているコンボの数と、変えるとどうなるか（変えた後は、起きたこと）を出す', () => {
+  const combo = { layer: 0, legend: 'us', layerCount: 10, layerModes: LAYER_MODES, onChange: () => {}, onRevert: () => {} } as const
+  const view = behaviorView({ tap: A }, 'us')
+  const used = renderToStaticMarkup(
+    <KeyEditor {...combo} place={{ row: 0, col: 1 }} behavior={{ tap: A }} view={view} changed={false} combos={{ used: 2, broken: 0 }} />,
+  )
+  expect(used).toContain(
+    '<p class="edit-note">このキーは、コンボ 2 件に使われています。動作を変えると、そのコンボはこのキーでは働かなくなります。</p>',
+  )
+  const unused = renderToStaticMarkup(
+    <KeyEditor {...combo} place={{ row: 0, col: 1 }} behavior={{ tap: A }} view={view} changed={false} />,
+  )
+  expect(unused).not.toContain('コンボ')
+  expect(used).not.toContain('働かなくなっています')
+  // 動作を変えた後は、知らせを消さずに、働かなくなったコンボの数を出す
+  const broken = renderToStaticMarkup(
+    <KeyEditor {...combo} place={{ row: 0, col: 1 }} behavior={{ tap: A }} view={view} changed combos={{ used: 0, broken: 2 }} />,
+  )
+  expect(broken).toContain(
+    '<p class="edit-note">このキーの動作を変えたので、コンボ 2 件が、このキーでは働かなくなっています。「変更を取り消す」で戻せます。</p>',
+  )
+  expect(broken).not.toContain('使われています')
+  const none = renderToStaticMarkup(
+    <KeyEditor {...combo} place={{ row: 0, col: 1 }} behavior={{ tap: A }} view={view} changed combos={{ used: 0, broken: 0 }} />,
+  )
+  expect(none).not.toContain('コンボ')
+})
+
 test('編集欄: エンコーダーは、欄が1つ（回した時）。動作を選ぶ部品には、エンコーダーに入れられる動作だけを出す', () => {
   const html = turnEditor({ kind: 'key', code: 0xaa, mods: [] }, true)
   expect(html).toContain('<h2>レイヤー 1 ・ エンコーダー 1 の左回し</h2>')

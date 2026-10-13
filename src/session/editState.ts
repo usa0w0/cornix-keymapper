@@ -4,8 +4,16 @@
 import type { ComboEntry, KeyboardSnapshot } from '../device/types.ts'
 import type { Action } from '../model/action.ts'
 import type { KeyBehavior } from '../model/behavior.ts'
+import { isNone, isTransparent } from '../model/behavior.ts'
 import { decodeKey } from '../model/decode.ts'
-import { applyEdits as encodeEdits, planKeyEdits, tapDanceUses, type KeyEditPlan } from '../model/encode.ts'
+import {
+  applyEdits as encodeEdits,
+  comboKeycode,
+  encodeBehavior,
+  planKeyEdits,
+  tapDanceUses,
+  type KeyEditPlan,
+} from '../model/encode.ts'
 import {
   countKeyEdits,
   EMPTY_EDITS,
@@ -13,13 +21,14 @@ import {
   linkedKeys,
   sameComboRef,
   type ComboContent,
+  type ComboKey,
   type ComboRef,
   type EditPlace,
   type Edits,
   type KeyEdit,
   type KeyPlace,
 } from '../model/edits.ts'
-import { customKeycodesOf, keycodeToAction, type CustomKeycode } from '../model/keycodes.ts'
+import { customKeycodesOf, KC_TRANSPARENT, keycodeToAction, type CustomKeycode } from '../model/keycodes.ts'
 
 export interface EditState {
   /** 基準: 本体から読んだもの。変更点の一覧を作る相手 */
@@ -172,12 +181,12 @@ export function sharedKeys(state: EditState, place: KeyPlace): KeyPlace[] {
   const plan = planKeys(state)
   const placed = (key: KeyPlace) => ![...plan.unplaced, ...plan.invalid].some((edit) => samePlace(edit, key))
   if (!placed(place)) return []
-  const uses = tapDanceUses({ ...state.source, keymap: plan.keymap, encoders: plan.encoders, tapDances: plan.tapDances })
+  const uses = tapDanceUses(plan)
   const keys = uses.find((use) => use.keys.some((key) => samePlace(key, place)))?.keys.filter(placed) ?? []
   return keys.length > 1 ? keys : []
 }
 
-/** キーとエンコーダーの編集を出発点に当てはめた結果（キーコードと Tap Dance の枠の割り当て、残り枠数、足りない枠の数） */
+/** 編集を出発点に当てはめた結果（キーコード、Tap Dance の枠とコンボの枠の割り当て、残り枠数、足りない枠の数） */
 export const planKeys = (state: EditState): KeyEditPlan => planKeyEdits(state.source, state.edits)
 
 /** 編集を受け付けたか。止めた時は、その編集を当てはめた場合の結果（blocked）を返す。状態は変えていない */
@@ -188,9 +197,9 @@ export interface KeyEditResult {
 
 /**
  * 編集した後の状態（next）で目標を作れるかを計算し、次の編集は、状態に反映せずに止める。
- * - Tap Dance の枠が足りなくなる編集（足りない枠の数が、いまより増えない編集は通す。
+ * - Tap Dance の枠か、コンボの枠が足りなくなる編集（足りない枠の数が、いまより増えない編集は通す。
  *   読み直した内容に編集を当て直した後など、すでに足りない時に、枠を減らす編集を止めないため）
- * - 本体の設定に直せない動作
+ * - 本体の設定に直せない動作、本体の設定に直せないコンボ
  */
 function guard(state: EditState, next: EditState): KeyEditResult {
   if (next === state) return { state, blocked: null }
@@ -199,7 +208,9 @@ function guard(state: EditState, next: EditState): KeyEditResult {
   const worse =
     plan.missing > before.missing ||
     plan.invalid.length > before.invalid.length ||
-    plan.invalidEncoders.length > before.invalidEncoders.length
+    plan.invalidEncoders.length > before.invalidEncoders.length ||
+    plan.missingCombos > before.missingCombos ||
+    plan.invalidCombos.length > before.invalidCombos.length
   return worse ? { state, blocked: plan } : { state: next, blocked: null }
 }
 
@@ -247,9 +258,13 @@ export const tryEditEncoder = (
   action: Action,
 ) => guard(state, editEncoder(state, layer, encoder, direction, action))
 
+/** 次に足すコンボに付く番号（足した順の番号。枠の番号ではない） */
+export const nextAddedCombo = (state: EditState): number =>
+  state.edits.combos.reduce((max, { ref }) => ('added' in ref ? Math.max(max, ref.added + 1) : max), 0)
+
 /** コンボを足す。足した順の番号を付ける（枠の番号ではない） */
 export function addCombo(state: EditState, combo: ComboContent): EditState {
-  const added = state.edits.combos.reduce((max, { ref }) => ('added' in ref ? Math.max(max, ref.added + 1) : max), 0)
+  const added = nextAddedCombo(state)
   return withEdits(state, { ...state.edits, combos: [...state.edits.combos, { ref: { added }, combo }] })
 }
 
@@ -262,6 +277,99 @@ export function editCombo(state: EditState, ref: ComboRef, combo: ComboContent |
     ? state.edits.combos.map((edit) => (sameComboRef(edit.ref, ref) ? { ref, combo } : edit))
     : [...state.edits.combos, { ref, combo }]
   return withEdits(state, { ...state.edits, combos })
+}
+
+/** コンボを足す。コンボの枠が足りない時と、本体の設定に直せないコンボは、状態に反映せずに止める */
+export const tryAddCombo = (state: EditState, combo: ComboContent) => guard(state, addCombo(state, combo))
+
+/**
+ * コンボを変える（combo が null なら消す）。本体の設定に直せないコンボは、状態に反映せずに止める。
+ * Tap Dance の枠が足りなくなる編集も止める（キーと同じ計算）
+ */
+export const tryEditCombo = (state: EditState, ref: ComboRef, combo: ComboContent | null) =>
+  guard(state, editCombo(state, ref, combo))
+
+/**
+ * その場所のキーを、コンボの同時に押すキーにする時の持ち方（キーの中身）。コンボのキーに選べない時は undefined。
+ * - 編集していないキーは、出発点のキーコード
+ * - 編集したキーのうち、枠を使わないもの（MT、LT など）は、動作から決まるキーコード
+ * - 編集して Tap Dance になるキーは、4欄の中身（枠の番号は、目標を作る時に決まる）
+ * 空のキー（何もしない）と透過のキーは、選べない
+ */
+export function comboKeyAt(state: EditState, place: KeyPlace): ComboKey | undefined {
+  const { source, edits } = state
+  const keycode = source.keymap[place.layer]?.[place.key]
+  if (keycode === undefined) return undefined
+  const edit = edits.keys.find((item) => samePlace(item, place))
+  const behavior: KeyBehavior = edit?.behavior ?? decodeKey(keycode, source.tapDances, customKeycodesOf(source.layout))
+  if (isNone(behavior) || isTransparent(behavior)) return undefined
+  if (!edit) return keycode
+  const encoded = encodeBehavior(edit.behavior)
+  if (!encoded) return undefined
+  if (encoded.feature === 'tapDance') return { tapDance: encoded.fields }
+  // 欄をすべて消したキーは、空のキー
+  return encoded.keycode === 0 || encoded.keycode === KC_TRANSPARENT ? undefined : encoded.keycode
+}
+
+/** 一覧に出すコンボ1つ */
+export interface ComboItem {
+  ref: ComboRef
+  /** 編集を当てはめた後の中身 */
+  combo: ComboContent
+  /** 同時に押すキーの、編集を当てはめた後のキーコード（combo.keys と同じ順）。枠が決まらなかったキーは undefined */
+  keycodes: (number | undefined)[]
+  /** 利用者が足したか、変えたコンボか */
+  changed: boolean
+}
+
+/**
+ * 編集を当てはめた後のコンボの一覧。出発点にあるコンボ（枠の番号順）の後に、足したコンボ（足した順）。
+ * 消したコンボと、空の枠は出さない
+ */
+export function comboList(state: EditState, plan: KeyEditPlan = planKeys(state)): ComboItem[] {
+  const { source, edits } = state
+  const custom = customKeycodesOf(source.layout)
+  const editOf = (ref: ComboRef) => edits.combos.find((edit) => sameComboRef(edit.ref, ref))
+  const item = (ref: ComboRef, combo: ComboContent, changed: boolean): ComboItem => ({
+    ref,
+    combo,
+    keycodes: combo.keys.map((key) => comboKeycode(plan, key)),
+    changed,
+  })
+  const existing = source.combos.flatMap((_, slot) => {
+    const edit = editOf({ slot })
+    const combo = edit ? edit.combo : comboAt(source, slot, custom)
+    return combo ? [item({ slot }, combo, edit !== undefined)] : []
+  })
+  const added = edits.combos
+    .flatMap(({ ref, combo }) => ('added' in ref && combo ? [{ ref, combo }] : []))
+    .sort((a, b) => a.ref.added - b.ref.added)
+    .map(({ ref, combo }) => item(ref, combo, true))
+  return [...existing, ...added]
+}
+
+/** そのキーと、コンボの関わり */
+export interface KeyComboUse {
+  /** そのキーのいまの中身を、同時に押すキーに使っているコンボの数 */
+  used: number
+  /** そのキーの動作を変えたために、そのキーでは働かなくなっているコンボの数 */
+  broken: number
+}
+
+/**
+ * そのキーを、同時に押すキーに使っているコンボの数と、動作を変えたために、そのキーでは働かなくなっているコンボの数。
+ * コンボは位置ではなくキーの中身で決まるので、キーコードで数える（コンボは、編集を当てはめた後の内容）。
+ * - used: 編集を当てはめた後のキーコードを持つコンボ。動作を変えていないキーでは、出発点の中身を持つコンボ
+ * - broken: 変える前の中身（出発点のキーコード）を持つコンボのうち、変えた後のキーコードは持たないもの。
+ *   変えた後の中身でも当たり続けるコンボは、入れない。動作を変えていないキーでは 0
+ */
+export function combosOfKey(state: EditState, place: KeyPlace, plan: KeyEditPlan = planKeys(state)): KeyComboUse {
+  const before = state.source.keymap[place.layer]?.[place.key]
+  const now = plan.keymap[place.layer]?.[place.key]
+  const has = (keycode: number | undefined) => (combo: { keys: readonly number[] }) => !!keycode && combo.keys.includes(keycode)
+  const used = plan.combos.filter(has(now))
+  const broken = before === now ? [] : plan.combos.filter(has(before)).filter((combo) => !used.includes(combo))
+  return { used: used.length, broken: broken.length }
 }
 
 /** その場所の編集を取り消す（出発点の内容に戻る）。連動して変えたキーは、同じ組のキーをまとめて取り消す */
@@ -312,7 +420,7 @@ export function reapplyEdits(state: EditState, fresh: KeyboardSnapshot): EditSta
 /**
  * 編集を本体の表現に直して、目標（出発点の写し）に書き込む関数。
  * キーの動作からキーコードへの変換と Tap Dance の枠の割り当て、エンコーダー、コンボの枠の割り当てを受け持つ。
- * 中身は model/encode.ts にある（キーとエンコーダーは作ってある。コンボは #13 で足す）
+ * 中身は model/encode.ts にある
  */
 export type ApplyEdits = (target: KeyboardSnapshot, edits: Edits) => void
 
@@ -363,7 +471,9 @@ export type SessionAction =
   | { type: 'editKeysTogether'; keys: KeyPlace[]; behavior: KeyBehavior; overwriteUnused?: boolean }
   /** エンコーダーの1方向の動作を変える。本体の設定に直せない動作は、反映しない（tryEditEncoder） */
   | { type: 'editEncoder'; layer: number; encoder: number; direction: 'left' | 'right'; action: Action }
+  /** コンボを足す。コンボの枠が足りない時は、反映しない（tryAddCombo） */
   | { type: 'addCombo'; combo: ComboContent }
+  /** コンボを変える・消す。本体の設定に直せないコンボは、反映しない（tryEditCombo） */
   | { type: 'editCombo'; ref: ComboRef; combo: ComboContent | null }
   /** その場所の編集を取り消す。取り消すと Tap Dance の枠が足りなくなる時は、反映しない（tryRevertEdit） */
   | { type: 'revert'; place: EditPlace }
@@ -410,9 +520,9 @@ function applyToEdit(edit: EditState, action: Exclude<SessionAction, { type: 're
     case 'editEncoder':
       return tryEditEncoder(edit, action.layer, action.encoder, action.direction, action.action).state
     case 'addCombo':
-      return addCombo(edit, action.combo)
+      return tryAddCombo(edit, action.combo).state
     case 'editCombo':
-      return editCombo(edit, action.ref, action.combo)
+      return tryEditCombo(edit, action.ref, action.combo).state
     case 'revert':
       return tryRevertEdit(edit, action.place).state
     case 'replaceSource':

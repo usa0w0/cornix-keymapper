@@ -3,6 +3,7 @@
 // Tap Dance の番号と、足したコンボの枠の番号は持たない（目標を作る時に決める）
 import type { Action } from './action.ts'
 import type { KeyBehavior } from './behavior.ts'
+import type { TapDanceFields } from './encode.ts'
 
 /** キーの場所。key はキーマップの中の番号（行 × 列数 + 列） */
 export interface KeyPlace {
@@ -28,9 +29,18 @@ export interface EncoderEdit {
   action: Action
 }
 
-/** コンボ1つの中身。同時に押すキーは、位置ではなく、キーの中身（キーコード。2〜4個）で持つ */
+/**
+ * コンボの、同時に押すキー1つ。位置ではなく、キーの中身で持つ。
+ * - 数値: 本体のキーコード。編集していないキーは出発点のキーコード、編集したキーのうち枠を使わないもの（MT、LT など）は、
+ *   動作から決まるキーコード
+ * - tapDance: この画面で編集して Tap Dance になるキーの、4欄の中身。枠の番号は、ほかの編集で変わりうるので持たず、
+ *   目標を作る時に、その中身の枠を指すキーコードに直す（docs/design.md「コンボ」）
+ */
+export type ComboKey = number | { tapDance: TapDanceFields }
+
+/** コンボ1つの中身。同時に押すキーは、位置ではなく、キーの中身（2〜4個）で持つ */
 export interface ComboContent {
-  keys: number[]
+  keys: ComboKey[]
   output: Action
 }
 

@@ -14,10 +14,14 @@ interface FigureProps {
   selected?: KeyTarget | null
   /** キーか、エンコーダーの1方向を押した時。渡すと、押せる部品にする */
   onSelect?: (target: KeyTarget) => void
+  /** コンボのタブ用。コンボのキーなら、押す順（0 から）。緑の枠と番号を出す */
+  comboOrder?: (target: KeyTarget) => number | undefined
+  /** コンボのタブ用。押せない場所（空のキー、透過のキー、エンコーダーなど）は false。省くと、すべて押せる */
+  canSelect?: (target: KeyTarget) => boolean
 }
 
 /** キーボード図。レイアウト定義から取り出した場所に、キーとエンコーダーを並べる */
-export function KeyboardFigure({ keys, viewOf, isChanged, selected, onSelect }: FigureProps) {
+export function KeyboardFigure({ keys, viewOf, isChanged, selected, onSelect, comboOrder, canSelect }: FigureProps) {
   const box = boundsOf(keys)
   return (
     <div className="figure-scroll">
@@ -32,8 +36,11 @@ export function KeyboardFigure({ keys, viewOf, isChanged, selected, onSelect }: 
           const view = viewOf(target)
           const changed = isChanged?.(target) ?? false
           const shape = key.kind === 'encoder' ? ` encoder encoder-${key.direction}` : ''
-          const name = `${targetName(key)}: ${titleOf(view)}${changed ? '（変更あり）' : ''}`
-          const className = `key state-${view.state}${shape}${changed ? ' changed' : ''}`
+          const order = comboOrder?.(target)
+          const combo = order === undefined ? '' : `（コンボの ${order + 1} つ目のキー）`
+          const name = `${targetName(key)}: ${titleOf(view)}${changed ? '（変更あり）' : ''}${combo}`
+          const className = `key state-${view.state}${shape}${changed ? ' changed' : ''}${order === undefined ? '' : ' in-combo'}`
+          const mark = order !== undefined && <span className="mark-combo">{order + 1}</span>
           const turn = key.kind === 'encoder' && (
             <span className="encoder-turn">{key.direction === 'left' ? '↺ 左回し' : '右回し ↻'}</span>
           )
@@ -44,12 +51,14 @@ export function KeyboardFigure({ keys, viewOf, isChanged, selected, onSelect }: 
                 key={targetId(target)}
                 className={className}
                 style={placeOf(key, box)}
-                aria-pressed={selected != null && targetId(selected) === targetId(target)}
+                aria-pressed={order !== undefined || (selected != null && targetId(selected) === targetId(target))}
                 aria-label={name}
                 title={name}
+                disabled={canSelect ? !canSelect(target) : undefined}
                 onClick={() => onSelect(target)}
               >
                 {turn}
+                {mark}
                 <KeyFace view={view} changed={changed} />
               </button>
             )
@@ -65,6 +74,7 @@ export function KeyboardFigure({ keys, viewOf, isChanged, selected, onSelect }: 
               title={name}
             >
               {turn}
+              {mark}
               <KeyFace view={view} changed={changed} />
             </div>
           )
