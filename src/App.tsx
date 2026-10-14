@@ -1,22 +1,365 @@
+import { useMemo, useReducer, useRef, useState } from 'react'
 import { isWebHidSupported } from './browserSupport.ts'
+import type { DeviceConnector, KeyboardDevice, KeyboardSnapshot } from './device/types.ts'
+import { listChanges, rewritesUsedTapDance } from './model/diff.ts'
+import {
+  EMPTY_SESSION,
+  hasUnwrittenChanges,
+  sessionReducer,
+  tryBuildTarget,
+  type ReloadChoice,
+  type SessionAction,
+} from './session/editState.ts'
+import { continueWithCurrent, interruptedWrite, type InterruptedWrite } from './session/writeSession.ts'
+import { browserBackupStorage, type BackupStorage } from './storage/backup.ts'
+import { snapshotToVil, vilToSnapshot } from './storage/vil.ts'
+import { AppHeader } from './ui/AppHeader.tsx'
+import { BackupDialog } from './ui/BackupDialog.tsx'
+import { ChangeListDialog } from './ui/ChangeListDialog.tsx'
+import { ComboView } from './ui/ComboView.tsx'
+import { DeviceInfoDialog } from './ui/DeviceInfoDialog.tsx'
+import { downloadText } from './ui/download.ts'
+import { editSlotCounts } from './ui/deviceInfo.ts'
+import { EditSessionContext } from './ui/editContext.ts'
+import { InterruptedDialog } from './ui/InterruptedDialog.tsx'
+import { KeymapView } from './ui/KeymapView.tsx'
+import { buildReadReport } from './ui/readReport.ts'
+import { ReloadDialog } from './ui/ReloadDialog.tsx'
+import { SessionBanner } from './ui/SessionBanner.tsx'
+import { ConnectStage, ReadFailedStage, ReadingStage } from './ui/Stage.tsx'
+import { UnsupportedBrowserWarning } from './ui/UnsupportedBrowserWarning.tsx'
+import { useConnection } from './ui/useConnection.ts'
+import { useDeviceRead } from './ui/useDeviceRead.ts'
+import { useLayerView } from './ui/useLayerView.ts'
+import { useLeaveConfirm } from './ui/useLeaveConfirm.ts'
+import { useWriteFlow, type FlowRead } from './ui/useWriteFlow.ts'
+import { VilDialog } from './ui/VilDialog.tsx'
+import { summarizeLoad, VIL_SIZE_LIMIT, type VilScene } from './ui/vilFlow.ts'
+import { WriteDialog } from './ui/WriteDialog.tsx'
 
-// develop のビルドは /cornix-keymapper/dev/ で配信される（.github/workflows/deploy.yml）
-const isDevSite = import.meta.env.BASE_URL.endsWith('/dev/')
+type Tab = 'keymap' | 'combo'
 
-function App() {
+const TABS: readonly { id: Tab; name: string }[] = [
+  { id: 'keymap', name: 'キーマップ' },
+  { id: 'combo', name: 'コンボ' },
+]
+
+interface Props {
+  connector: DeviceConnector
+  /** このブラウザーで接続できるか。省くと、WebHID があるかで決める */
+  supported?: boolean
+  /** 自動バックアップの保存先。省くと、ブラウザーの localStorage */
+  backups?: BackupStorage
+}
+
+/**
+ * 画面の枠組み。上から、知らせの帯、ヘッダー、タブ、中身。
+ * 1回も読み出していない間は、中身の代わりに中央のカードを出す。
+ * 読み出した後は、接続が切れても、読み込んだ内容と編集を画面に残し、帯で知らせる。
+ * 書き込みの流れ（読み直し、バックアップ、書き込み、照合、失敗の後の選択）の間は、ダイアログを出して、編集とほかの操作を止める
+ */
+function App({ connector, supported = isWebHidSupported(), backups }: Props) {
+  const { state: connection, open, close } = useConnection(connector)
+  const device = connection.status === 'connected' ? connection.device : null
+  const { state: reading, read, replace, put } = useDeviceRead(device)
+  const [storage] = useState(() => backups ?? browserBackupStorage())
+  const [session, dispatch] = useReducer(sessionReducer, EMPTY_SESSION)
+  const store = useMemo(() => ({ session, dispatch }), [session])
+  const [tab, setTab] = useState<Tab>('keymap')
+  // 開いているレイヤーと刻印は、タブを切り替えても同じものを使う
+  const shown = useLayerView()
+  const info = useRef<HTMLDialogElement>(null)
+  const report = reading?.status === 'done' ? reading.report : null
+  const { edit, pending } = session
+  // 変更点の一覧。1行が取り消しの単位で、ヘッダーなどに出す件数は、この行数
+  const changeList = useMemo(() => (edit ? listChanges(edit, shown.legend) : []), [edit, shown.legend])
+  const changes = changeList.length
+  const [confirming, setConfirming] = useState(false)
+  // 変更点の一覧から取り消した回数。キーマップのタブが、共有中のキーの確認への答えを忘れるのに使う
+  const [reverts, setReverts] = useState(0)
+  // 残り枠数は、編集を当てはめた後の数。編集に合わせて増減する
+  const slots = useMemo(() => edit && editSlotCounts(edit), [edit])
+
+  // 書き込む目標。目標を作れない編集（Tap Dance の枠が足りない、など）がある間は null で、書き込みを始めない
+  const target = useMemo(() => edit && tryBuildTarget(edit), [edit])
+  const rewritesUsed = useMemo(() => edit !== null && target !== null && rewritesUsedTapDance(edit.baseline, target), [edit, target])
+  // 接続した機器に残っていた、前回の書き込みの印。利用者が、戻すか、続けるかを選ぶまで持つ
+  const [interrupted, setInterrupted] = useState<Exclude<InterruptedWrite, { status: 'none' }> | null>(null)
+  const [showBackups, setShowBackups] = useState(false)
+  // .vil の保存と読み込みのダイアログ
+  const [vil, setVil] = useState<VilScene | null>(null)
+
+  // 書き込みの流れの中で読み終えた内容を、本体の情報のダイアログ（診断）にも出す。通信の記録には、書き込みの分も入る
+  const showRead = ({ device: from, snapshot, since }: FlowRead) =>
+    put(
+      from,
+      buildReadReport({
+        note: 'Cornix キーマッパーの書き込みの記録。書く前の読み直し、書き込み、照合の読み直しの通信を含む',
+        readAt: new Date(),
+        userAgent: navigator.userAgent,
+        device: { name: from.name, protocol: from.protocol },
+        snapshot,
+        differencesFromPrevious: null,
+        exchanges: from.exchanges(since),
+      }),
+    )
+  const writing = useWriteFlow({
+    backups: storage,
+    onWritten: (done) => {
+      dispatch({ type: 'written', verified: done.snapshot })
+      showRead(done)
+    },
+    // 戻した後の本体が、画面に読み込んだ時と同じなら、編集はそのまま続けられる。違えば、つなぎ直した時と同じ確認が出る
+    onRestored: (done) => {
+      dispatch({ type: 'read', snapshot: done.snapshot })
+      showRead(done)
+    },
+  })
+  const { flow } = writing
+  const idle = flow.phase === 'idle'
+
+  // 書き込みの途中と、失敗の後（本体が書きかけ）も、ページを離れる前に確認を出す
+  useLeaveConfirm((edit !== null && hasUnwrittenChanges(edit)) || flow.phase === 'working' || flow.phase === 'failed')
+
+  // 開いた時は、最初の押せる部品（診断の見出し）ではなく、「閉じる」に焦点を置く
+  const showInfo = () => {
+    info.current?.showModal()
+    info.current?.querySelector<HTMLButtonElement>('.dialog-actions button')?.focus()
+  }
+
+  // 読み出した内容を、編集中の状態に渡す。失敗した時と、途中で別の読み出しが始まった時は渡さない
+  // 同じ機器に、前回の書き込みの印が残っていれば、戻すか、続けるかを選ばせる
+  const load = async (from: KeyboardDevice) => {
+    const loaded = await read(from)
+    if (!loaded) return
+    dispatch({ type: 'read', snapshot: loaded.snapshot })
+    const found = interruptedWrite(storage, loaded.snapshot.uid)
+    setInterrupted(found.status === 'none' ? null : found)
+  }
+
+  // 接続したら、利用者が押さなくても、続けて読み出す
+  const connect = async () => {
+    // 前の機器についての選択待ちが残っていれば、捨てる
+    dispatch({ type: 'resolve', choice: 'cancel' })
+    const connected = await open()
+    // 書き込みの失敗の後のつなぎ直しでは、本体は書きかけなので、読み出して編集中の状態に渡すことはしない
+    // （失敗後の状態を持ったまま、再試行か、戻すが、本体を読み直す）
+    if (connected && writing.current.current.phase === 'idle') await load(connected)
+  }
+
+  // 書き込みの失敗の後に、機器を選び直す
+  const reconnect = async () => {
+    await close()
+    await connect()
+  }
+
+  const revert = (action: SessionAction) => {
+    dispatch(action)
+    setReverts((count) => count + 1)
+  }
+
+  const choose = (choice: ReloadChoice) => {
+    dispatch({ type: 'resolve', choice })
+    if (choice === 'cancel') void close()
+  }
+
+  // 「本体に書き込む」を押せるか。押せない間は、その理由を出す
+  const write =
+    !device || !edit
+      ? { blocked: 'キーボードとつながっていないので、書き込めません。このダイアログを閉じて、「接続」を押してください。' }
+      : reading?.status !== 'done'
+        ? { blocked: '本体の設定を読み直し終えるまで、書き込めません。' }
+        : !target
+          ? { blocked: '書き込めない変更があります（一覧に理由が出ています）。その変更を取り消すと、書き込めます。' }
+          : changes === 0
+            ? { blocked: '変更はありません。' }
+            : {
+                onWrite: () => {
+                  setConfirming(false)
+                  void writing.start(device, edit.baseline, target)
+                },
+              }
+
+  // バックアップの内容を、出発点に入れる。すぐには書き込まず、変更点の確認を開く
+  const restoreBackup = (snapshot: KeyboardSnapshot) => {
+    revert({ type: 'replaceSource', source: snapshot })
+    setShowBackups(false)
+    setConfirming(true)
+  }
+
+  // 画面の内容（出発点に編集を当てはめた目標）を .vil にしたもの。保存できない時は、その理由
+  const vilSave = !edit
+    ? { blocked: '保存する内容がありません。' }
+    : !target
+      ? {
+          blocked:
+            '書き込めない変更があるので、保存できません。「書き込み」を押すと、その変更と理由が一覧に出ます。その変更を取り消すと、保存できます。',
+        }
+      : { text: snapshotToVil(target) }
+  const saveVil = (name: string) => {
+    if (!vilSave.text) return
+    downloadText(name, vilSave.text)
+    setVil(null)
+  }
+
+  // 選んだ .vil を、出発点に入れる。すぐには書き込まない。読み込めない時は、理由を出し、画面の内容は変えない。
+  // 照合の相手は、基準（この画面に読み込んであるキーボード）。接続が切れている間も読み込める
+  const loadVil = async (file: File) => {
+    if (!edit) return
+    const { name } = file
+    if (file.size > VIL_SIZE_LIMIT) return setVil({ scene: 'failed', name, failure: { reason: 'too-large' } })
+    const text = await file.text().catch(() => null)
+    if (text === null) return setVil({ scene: 'failed', name, failure: { reason: 'unreadable' } })
+    const result = vilToSnapshot(text, edit.baseline)
+    if (!result.ok) return setVil({ scene: 'failed', name, failure: result.failure })
+    // 編集は、読み込んだ設定の上に残る。読み込む前の数を持っておき、読み込んだ後の知らせで、どうなったかを伝える
+    const editsBefore = summarizeLoad(changeList).edits
+    revert({ type: 'replaceSource', source: result.snapshot })
+    setVil({ scene: 'loaded', name, extras: result.extras, editsBefore })
+  }
+
+  // 書き込み前に本体の設定が変わっていた時の「本体から読み込み直す」。編集を捨てて、読み直した内容から始め直す
+  const reload = (fresh: KeyboardSnapshot) => {
+    const traced = writing.traced(fresh)
+    revert({ type: 'reload', snapshot: fresh })
+    if (traced) showRead(traced)
+    writing.close()
+  }
+
   return (
-    <>
-      {!isWebHidSupported() && (
-        <p className="warning" role="alert">
-          このブラウザーではキーボードに接続できません。デスクトップ版の Chrome または Edge
-          で開いてください。
-        </p>
-      )}
-      <main>
-        <h1>Cornix キーマッパー{isDevSite && <span className="badge">開発版</span>}</h1>
-        <p>準備中です。</p>
-      </main>
-    </>
+    <EditSessionContext value={store}>
+      <div className="app">
+        {!supported && <UnsupportedBrowserWarning />}
+        {edit && (
+          <SessionBanner
+            connection={connection}
+            reading={reading}
+            supported={supported}
+            changes={changes}
+            onConnect={connect}
+            onRetry={() => device && load(device)}
+          />
+        )}
+        <AppHeader
+          connection={connection}
+          supported={supported}
+          slots={slots}
+          changes={changes}
+          onWrite={changes > 0 ? () => setConfirming(true) : null}
+          onBackups={() => setShowBackups(true)}
+          onSaveVil={() => setVil({ scene: 'save', at: new Date() })}
+          onLoadVil={(file) => void loadVil(file)}
+          onConnect={connect}
+          onDisconnect={close}
+          onDeviceInfo={report ? showInfo : null}
+        />
+        {edit && (
+          <nav className="app-tabs" aria-label="画面の切り替え">
+            {TABS.map(({ id, name }) => (
+              <button type="button" key={id} aria-pressed={tab === id} onClick={() => setTab(id)}>
+                {name}
+              </button>
+            ))}
+          </nav>
+        )}
+        <main>
+          {edit ? (
+            tab === 'keymap' ? (
+              <KeymapView state={edit} onAction={dispatch} shown={shown} reverts={reverts} />
+            ) : (
+              <ComboView state={edit} onAction={dispatch} shown={shown} />
+            )
+          ) : !device || !reading ? (
+            <ConnectStage
+              supported={supported}
+              connecting={connection.status === 'connecting'}
+              notice={connection.status === 'disconnected' ? connection.notice : undefined}
+              onConnect={connect}
+            />
+          ) : reading.status === 'failed' ? (
+            <ReadFailedStage failure={reading.failure} onRetry={() => load(device)} />
+          ) : (
+            // 読み終えた内容が編集中の状態に入るまでの一瞬も、読み込み中として見せる
+            <ReadingStage progress={reading.status === 'reading' ? reading.progress : null} />
+          )}
+        </main>
+        {device && report && (
+          <DeviceInfoDialog
+            ref={info}
+            device={device}
+            report={report}
+            onReport={(next) => {
+              replace(device, next)
+              dispatch({ type: 'read', snapshot: next.snapshot })
+            }}
+          />
+        )}
+        {/* 読み直した内容についての選択待ちの間は、編集を受け付けないので、出さない */}
+        {edit && confirming && !pending && idle && (
+          <ChangeListDialog
+            state={edit}
+            changes={changeList}
+            onAction={revert}
+            onClose={() => setConfirming(false)}
+            write={write}
+            rewritesUsed={rewritesUsed}
+          />
+        )}
+        {edit && showBackups && !pending && idle && (
+          <BackupDialog
+            backups={storage}
+            baseline={edit.baseline}
+            source={edit.source}
+            changes={changes}
+            onRestore={restoreBackup}
+            onClose={() => setShowBackups(false)}
+          />
+        )}
+        {edit && vil && !pending && idle && (
+          <VilDialog
+            scene={vil}
+            changes={changes}
+            summary={summarizeLoad(changeList)}
+            saveBlocked={vilSave.blocked ?? (vilSave.text === null ? '機器の識別が読み取れないので、保存できません。' : null)}
+            onSave={saveVil}
+            onReview={() => {
+              setVil(null)
+              setConfirming(true)
+            }}
+            onClose={() => setVil(null)}
+          />
+        )}
+        {flow.phase !== 'idle' && (
+          <WriteDialog
+            flow={flow}
+            connected={device !== null}
+            changes={changes}
+            onRetry={() => device && flow.phase === 'failed' && void writing.resume(device, 'retry', flow.job)}
+            onRestore={() => device && flow.phase === 'failed' && void writing.resume(device, 'restore', flow.job)}
+            onOverwrite={() => device && flow.phase === 'changed' && void writing.start(device, flow.fresh, flow.target)}
+            onReload={() => flow.phase === 'changed' && reload(flow.fresh)}
+            onConnect={device ? reconnect : connect}
+            onSaveLog={writing.saveLog}
+            onClose={writing.close}
+          />
+        )}
+        {/* 書き込みの流れの間は、その結果が出てから確かめる */}
+        {device && edit && pending && idle && <ReloadDialog pending={pending} changes={changes} onChoose={choose} />}
+        {device && edit && interrupted && !pending && idle && (
+          <InterruptedDialog
+            interrupted={interrupted}
+            onRestore={() => {
+              setInterrupted(null)
+              if (interrupted.status === 'pending') void writing.resume(device, 'restore', interrupted.job)
+            }}
+            onContinue={() => {
+              continueWithCurrent(storage, edit.baseline.uid)
+              setInterrupted(null)
+            }}
+          />
+        )}
+      </div>
+    </EditSessionContext>
   )
 }
 
