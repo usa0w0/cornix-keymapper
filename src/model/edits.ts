@@ -1,0 +1,100 @@
+// 編集（利用者が変えたものだけ）の型。編集中の状態（session/editState.ts）が持ち、
+// 本体の設定への変換（encode.ts）と変更点の一覧（diff.ts）が読む。
+// Tap Dance の番号と、足したコンボの枠の番号は持たない（目標を作る時に決める）
+import type { Action } from './action.ts'
+import type { KeyBehavior } from './behavior.ts'
+import type { TapDanceFields } from './encode.ts'
+
+/** キーの場所。key はキーマップの中の番号（行 × 列数 + 列） */
+export interface KeyPlace {
+  layer: number
+  key: number
+}
+
+/** キー1つの編集 */
+export interface KeyEdit extends KeyPlace {
+  behavior: KeyBehavior
+  /**
+   * 連動して変えたキーの組の番号。同じ枠を共有していたキーを「n つとも変更」で一緒に変えた時に、同じ番号を入れる。
+   * 同じ番号のキーは、まとめて1件として数え、まとめて取り消す。1つだけで変えたキーにはない
+   */
+  link?: number
+}
+
+/** エンコーダーの1方向の編集 */
+export interface EncoderEdit {
+  layer: number
+  encoder: number
+  direction: 'left' | 'right'
+  action: Action
+}
+
+/**
+ * コンボの、同時に押すキー1つ。位置ではなく、キーの中身で持つ。
+ * - 数値: 本体のキーコード。編集していないキーは出発点のキーコード、編集したキーのうち枠を使わないもの（MT、LT など）は、
+ *   動作から決まるキーコード
+ * - tapDance: この画面で編集して Tap Dance になるキーの、4欄の中身。枠の番号は、ほかの編集で変わりうるので持たず、
+ *   目標を作る時に、その中身の枠を指すキーコードに直す（docs/design.md「コンボ」）
+ */
+export type ComboKey = number | { tapDance: TapDanceFields }
+
+/** コンボ1つの中身。同時に押すキーは、位置ではなく、キーの中身（2〜4個）で持つ */
+export interface ComboContent {
+  keys: ComboKey[]
+  output: Action
+}
+
+/**
+ * どのコンボか。出発点にあるコンボは、その枠の番号（slot）で指す。
+ * 足したコンボは、足した順の番号（added）で指す。枠の番号ではなく、枠は目標を作る時に決める
+ */
+export type ComboRef = { slot: number } | { added: number }
+
+/** コンボ1つの編集。combo が null なら、そのコンボを消す（足したコンボを消す時は、編集ごと取り除く） */
+export interface ComboEdit {
+  ref: ComboRef
+  combo: ComboContent | null
+}
+
+/** 編集。同じ場所（キー、エンコーダーの1方向、コンボ）は1つだけ持つ */
+export interface Edits {
+  keys: KeyEdit[]
+  encoders: EncoderEdit[]
+  combos: ComboEdit[]
+  /**
+   * Tap Dance の枠が足りない時に、中身はあるがどこからも使われていない枠を、上書きして使ってよいか。
+   * 利用者が、枠が足りない時の確認で認めた時だけ入る。キーの編集がなくなったら、なくなる
+   */
+  overwriteUnusedTapDances?: boolean
+}
+
+/** 編集の場所。取り消す時に使う */
+export type EditPlace =
+  | { kind: 'key'; layer: number; key: number }
+  | { kind: 'encoder'; layer: number; encoder: number; direction: 'left' | 'right' }
+  | { kind: 'combo'; ref: ComboRef }
+
+export const EMPTY_EDITS: Edits = { keys: [], encoders: [], combos: [] }
+
+export const isEmptyEdits = (edits: Edits) =>
+  edits.keys.length === 0 && edits.encoders.length === 0 && edits.combos.length === 0
+
+/** 取り消しの単位で数えた、キーの編集の数。連動して変えたキーの組は、まとめて1件 */
+export const countKeyEdits = (keys: readonly KeyEdit[]) =>
+  keys.filter((edit) => edit.link === undefined).length + new Set(keys.flatMap((edit) => edit.link ?? [])).size
+
+/**
+ * そのキーと一緒に取り消されるキー（そのキー自身を含む。レイヤー、キーの番号の順）。
+ * 連動して変えたキーなら、同じ組のキーすべて。編集していないキーなら空
+ */
+export function linkedKeys(keys: readonly KeyEdit[], place: KeyPlace): KeyPlace[] {
+  const edit = keys.find((item) => item.layer === place.layer && item.key === place.key)
+  if (!edit) return []
+  return keys
+    .filter((item) => item === edit || (edit.link !== undefined && item.link === edit.link))
+    .map(({ layer, key }) => ({ layer, key }))
+    .sort((a, b) => a.layer - b.layer || a.key - b.key)
+}
+
+export const sameComboRef = (a: ComboRef, b: ComboRef) =>
+  'slot' in a ? 'slot' in b && a.slot === b.slot : 'added' in b && a.added === b.added
